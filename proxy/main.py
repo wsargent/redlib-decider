@@ -90,14 +90,13 @@ def post_text(post) -> str:
     title = post.select_one(".post_title")
     body = post.select_one(".post_body.post_preview")
     subreddit = post.select_one(".post_subreddit")
-    score = post.select_one(".post_score")
-    comments = post.select_one(".post_comments")
+    # Keep the classifier input stable across refreshes. Scores and comment
+    # counts change frequently and do not help classify the requested topics;
+    # including them would defeat the persistent decision cache.
     parts = [
         f"Title: {title.get_text(' ', strip=True) if title else ''}",
         f"Community: {subreddit.get_text(' ', strip=True) if subreddit else ''}",
         f"Preview: {body.get_text(' ', strip=True) if body else ''}",
-        f"Score: {score.get_text(' ', strip=True) if score else ''}",
-        f"Comments: {comments.get_text(' ', strip=True) if comments else ''}",
     ]
     return "\n".join(parts)[:6000]
 
