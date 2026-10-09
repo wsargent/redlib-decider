@@ -33,7 +33,7 @@ To stop it:
 docker compose down
 ```
 
-To change the filtering strictness, edit `.env` and restart. `QUALITY_THRESHOLD` is the minimum yes-probability from Decider; higher values hide more posts. `POLITICS_THRESHOLD` is the probability at which a post is treated as political and removed; `0.50` is intentionally set to remove borderline political content. These are practical starting points, not validated model boundaries.
+To change the filtering strictness, edit `.env` and restart. `QUALITY_THRESHOLD` is the minimum yes-probability from Decider; higher values hide more posts. `POLITICS_THRESHOLD` is the probability at which a post is treated as political and removed; `DEATH_THRESHOLD`, `RELATIONSHIP_THRESHOLD`, and `CUTE_ANIMAL_THRESHOLD` control removal of posts about death/grief, divorce or breakups, and cute animals. All default to `0.50` to remove borderline matches. These are practical starting points, not validated model boundaries.
 
 ## Local development with uv
 

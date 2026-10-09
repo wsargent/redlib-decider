@@ -15,6 +15,9 @@ REDLIB_URL = os.getenv("REDLIB_URL", "http://redlib:8080").rstrip("/")
 DECIDER_URL = os.getenv("DECIDER_URL", "http://decider:8099").rstrip("/")
 QUALITY_THRESHOLD = float(os.getenv("QUALITY_THRESHOLD", "0.55"))
 POLITICS_THRESHOLD = float(os.getenv("POLITICS_THRESHOLD", "0.50"))
+DEATH_THRESHOLD = float(os.getenv("DEATH_THRESHOLD", "0.50"))
+RELATIONSHIP_THRESHOLD = float(os.getenv("RELATIONSHIP_THRESHOLD", "0.50"))
+CUTE_ANIMAL_THRESHOLD = float(os.getenv("CUTE_ANIMAL_THRESHOLD", "0.50"))
 DECIDER_TIMEOUT = float(os.getenv("DECIDER_TIMEOUT", "20"))
 CACHE_SIZE = int(os.getenv("DECISION_CACHE_SIZE", "512"))
 
@@ -82,6 +85,30 @@ async def is_allowed(text: str, client: httpx.AsyncClient) -> bool:
                     "false": "The post is not substantially political, even if it briefly mentions a public figure, country, or current event.",
                 },
             },
+            "death": {
+                "type": "noul",
+                "instructions": "Is this Reddit post substantially about death, dying, bereavement, grief, funerals, or serious terminal illness?",
+                "criteria": {
+                    "true": "The post substantially concerns someone or an animal dying, a death, bereavement, grief, a funeral, or terminal illness.",
+                    "false": "The post is not substantially about death or grief.",
+                },
+            },
+            "relationship": {
+                "type": "noul",
+                "instructions": "Is this Reddit post substantially about divorce, separation, a breakup, or a failing romantic relationship?",
+                "criteria": {
+                    "true": "The post concerns divorce, separation, a breakup, infidelity, or serious romantic relationship conflict.",
+                    "false": "The post is not substantially about divorce, a breakup, or romantic relationship conflict.",
+                },
+            },
+            "cute_animal": {
+                "type": "noul",
+                "instructions": "Is this Reddit post primarily presenting a cute, adorable, wholesome, or amusing animal?",
+                "criteria": {
+                    "true": "The post primarily presents a cute, adorable, wholesome, or amusing animal, including a pet photo or animal video.",
+                    "false": "The post is not primarily cute-animal content.",
+                },
+            },
         },
     }
     try:
@@ -90,7 +117,16 @@ async def is_allowed(text: str, client: httpx.AsyncClient) -> bool:
         answers = response.json()["answers"]
         quality = float(answers["quality"]["noul"])
         political = float(answers["political"]["noul"])
-        result = quality >= QUALITY_THRESHOLD and political < POLITICS_THRESHOLD
+        death = float(answers["death"]["noul"])
+        relationship = float(answers["relationship"]["noul"])
+        cute_animal = float(answers["cute_animal"]["noul"])
+        result = (
+            quality >= QUALITY_THRESHOLD
+            and political < POLITICS_THRESHOLD
+            and death < DEATH_THRESHOLD
+            and relationship < RELATIONSHIP_THRESHOLD
+            and cute_animal < CUTE_ANIMAL_THRESHOLD
+        )
     except (httpx.HTTPError, KeyError, TypeError, ValueError):
         # Keep Redlib usable if the local model is warming up or unavailable.
         result = True

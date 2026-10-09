@@ -2,9 +2,12 @@ from proxy.main import filter_html
 
 
 class FakeResponse:
-    def __init__(self, quality, political):
+    def __init__(self, quality, political, death=0.1, relationship=0.1, cute_animal=0.1):
         self.quality = quality
         self.political = political
+        self.death = death
+        self.relationship = relationship
+        self.cute_animal = cute_animal
 
     def raise_for_status(self):
         pass
@@ -14,6 +17,9 @@ class FakeResponse:
             "answers": {
                 "quality": {"noul": self.quality},
                 "political": {"noul": self.political},
+                "death": {"noul": self.death},
+                "relationship": {"noul": self.relationship},
+                "cute_animal": {"noul": self.cute_animal},
             }
         }
 
@@ -24,6 +30,8 @@ class FakeClient:
         return FakeResponse(
             quality=0.1 if "bad" in title else 0.9,
             political=0.9 if "politics" in title else 0.1,
+            relationship=0.9 if "breakup" in title else 0.1,
+            cute_animal=0.9 if "cat" in title else 0.1,
         )
 
 
@@ -33,3 +41,9 @@ async def test_filter_removes_low_quality_and_political_posts():
     assert 'id="good"' in result
     assert 'id="bad"' not in result
     assert 'id="politics"' not in result
+
+
+async def test_filter_removes_detail_page_post():
+    html = '''<main><div class="post highlighted" id="detail"><h1 class="post_title">Cute cat after a breakup</h1><div class="post_body">A sad story</div></div></main>'''
+    result = await filter_html(html, FakeClient())
+    assert 'id="detail"' not in result
