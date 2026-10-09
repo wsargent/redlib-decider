@@ -72,7 +72,13 @@ def persist_decision(key: str, result: bool) -> None:
         return
     try:
         with sqlite3.connect(DECISION_DB) as db:
+            db.execute("CREATE TABLE IF NOT EXISTS decisions (key TEXT PRIMARY KEY, allowed INTEGER NOT NULL)")
             db.execute("INSERT OR REPLACE INTO decisions(key, allowed) VALUES (?, ?)", (key, int(result)))
+            db.execute(
+                "DELETE FROM decisions WHERE key NOT IN "
+                "(SELECT key FROM decisions ORDER BY rowid DESC LIMIT ?)",
+                (CACHE_SIZE,),
+            )
             db.commit()
     except OSError:
         pass

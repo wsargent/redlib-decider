@@ -1,3 +1,6 @@
+import sqlite3
+
+import proxy.main as proxy_main
 from proxy.main import decision_answers, filter_html
 
 
@@ -52,6 +55,18 @@ class FakeClient:
             relationship=0.9 if "breakup" in title else 0.1,
             cute_animal=0.9 if "cat" in title else 0.1,
         )
+
+
+def test_persistent_cache_is_bounded(tmp_path, monkeypatch):
+    db_path = tmp_path / "decisions.sqlite3"
+    monkeypatch.setattr(proxy_main, "DECISION_DB", str(db_path))
+    monkeypatch.setattr(proxy_main, "CACHE_SIZE", 2)
+    monkeypatch.setattr(proxy_main, "PERSISTENT_CACHE", True)
+    for key in ("one", "two", "three"):
+        proxy_main.persist_decision(key, True)
+    with sqlite3.connect(db_path) as db:
+        assert db.execute("SELECT COUNT(*) FROM decisions").fetchone()[0] == 2
+        assert db.execute("SELECT key FROM decisions ORDER BY rowid").fetchall() == [("two",), ("three",)]
 
 
 async def test_openai_decisions_payload(monkeypatch):
