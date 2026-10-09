@@ -30,9 +30,20 @@ def fetch(url: str, timeout: float) -> tuple[int, int, float]:
         return exc.code, 0, time.perf_counter() - started
 
 
-def metrics(url: str, timeout: float) -> dict[str, float]:
-    with urlopen(url, timeout=timeout) as response:
-        text = response.read().decode()
+def metrics(url: str, timeout: float, retries: int = 10) -> dict[str, float]:
+    last_error = None
+    for attempt in range(retries):
+        try:
+            with urlopen(url, timeout=timeout) as response:
+                text = response.read().decode()
+            break
+        except (URLError, TimeoutError) as exc:
+            last_error = exc
+            if attempt + 1 == retries:
+                raise
+            time.sleep(1)
+    else:
+        raise last_error
     result = {}
     for line in text.splitlines():
         if not line or line.startswith("#"):
