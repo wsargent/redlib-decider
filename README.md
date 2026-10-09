@@ -33,7 +33,7 @@ To stop it:
 docker compose down
 ```
 
-To change the filtering strictness, edit `.env` and restart. `QUALITY_THRESHOLD` is the minimum yes-probability from Decider; higher values hide more posts. A value around `0.55` is a starting point, not a validated quality boundary.
+To change the filtering strictness, edit `.env` and restart. `QUALITY_THRESHOLD` is the minimum yes-probability from Decider; higher values hide more posts. `POLITICS_THRESHOLD` is the probability at which a post is treated as political and removed; `0.50` is intentionally set to remove borderline political content. These are practical starting points, not validated model boundaries.
 
 ## Local development with uv
 
@@ -53,6 +53,6 @@ REDLIB_URL=http://127.0.0.1:8081 DECIDER_URL=http://127.0.0.1:8099 \
 
 - Redlib has no post-filter extension point, so the proxy filters rendered HTML using Redlib's current `.post` selectors. If Redlib changes its markup, update `proxy/main.py`.
 - `redlib.env` contains only Redlib settings. Proxy and Decider settings belong in `.env` and Compose's `environment` block.
-- The classifier evaluates title, community, preview, score, and comment text. It does not fetch linked pages or media.
+- The classifier evaluates title, community, preview, score, and comment text. It removes posts classified as political, including political parties, elections, government, geopolitical conflicts, and political commentary. It does not fetch linked pages or media.
 - Only HTML GET responses are filtered. Assets and non-GET requests are passed through.
 - The model uses CPU by default in this Compose setup. A future Linux/Proxmox deployment can add a GPU-specific Decider image or device configuration without changing the proxy contract.

@@ -14,6 +14,7 @@ from fastapi import FastAPI, Request, Response
 REDLIB_URL = os.getenv("REDLIB_URL", "http://redlib:8080").rstrip("/")
 DECIDER_URL = os.getenv("DECIDER_URL", "http://decider:8099").rstrip("/")
 QUALITY_THRESHOLD = float(os.getenv("QUALITY_THRESHOLD", "0.55"))
+POLITICS_THRESHOLD = float(os.getenv("POLITICS_THRESHOLD", "0.50"))
 DECIDER_TIMEOUT = float(os.getenv("DECIDER_TIMEOUT", "20"))
 CACHE_SIZE = int(os.getenv("DECISION_CACHE_SIZE", "512"))
 
@@ -56,7 +57,7 @@ def post_text(post) -> str:
     return "\n".join(parts)[:6000]
 
 
-async def is_quality(text: str, client: httpx.AsyncClient) -> bool:
+async def is_allowed(text: str, client: httpx.AsyncClient) -> bool:
     key = hashlib.sha256(text.encode()).hexdigest()
     cached = cache.get(key)
     if cached is not None:
@@ -72,14 +73,24 @@ async def is_quality(text: str, client: httpx.AsyncClient) -> bool:
                     "true": "The post has meaningful substance, useful information, a clear question, original insight, or genuine discussion value.",
                     "false": "The post is low-effort, repetitive, spammy, engagement bait, or has little useful content.",
                 },
-            }
+            },
+            "political": {
+                "type": "noul",
+                "instructions": "Is this Reddit post substantially about politics or political controversy?",
+                "criteria": {
+                    "true": "The post concerns elections, political parties, politicians, government policy, legislation, political movements, geopolitical conflict, or political commentary.",
+                    "false": "The post is not substantially political, even if it briefly mentions a public figure, country, or current event.",
+                },
+            },
         },
     }
     try:
         response = await client.post(f"{DECIDER_URL}/v1/systemone", json=request)
         response.raise_for_status()
-        probability = float(response.json()["answers"]["quality"]["noul"])
-        result = probability >= QUALITY_THRESHOLD
+        answers = response.json()["answers"]
+        quality = float(answers["quality"]["noul"])
+        political = float(answers["political"]["noul"])
+        result = quality >= QUALITY_THRESHOLD and political < POLITICS_THRESHOLD
     except (httpx.HTTPError, KeyError, TypeError, ValueError):
         # Keep Redlib usable if the local model is warming up or unavailable.
         result = True
@@ -91,7 +102,7 @@ async def filter_html(html: str, client: httpx.AsyncClient) -> str:
     soup = BeautifulSoup(html, "html.parser")
     posts = soup.select("#posts .post") or soup.select(".post")
     for post in posts:
-        if not await is_quality(post_text(post), client):
+        if not await is_allowed(post_text(post), client):
             separator = post.find_next_sibling("hr", class_="sep")
             post.decompose()
             if separator:
@@ -123,8 +134,12 @@ async def proxy(request: Request, path: str) -> Response:
     headers = {
         key: value
         for key, value in request.headers.items()
-        if key.lower() not in {"host", "content-length"}
+        if key.lower() not in {"host", "content-length", "accept-encoding"}
     }
+    # httpx transparently decompresses upstream responses, but the proxy may
+    # rewrite HTML. Request identity encoding so we never forward compressed
+    # bytes after removing the upstream Content-Encoding header.
+    headers["accept-encoding"] = "identity"
     upstream = await request.app.state.client.request(
         request.method, target, content=body, headers=headers
     )
