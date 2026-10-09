@@ -89,6 +89,34 @@ async def test_openai_decisions_payload(monkeypatch):
     assert answers["allowed"] == 0.75
 
 
+async def test_filter_topics_are_configurable(monkeypatch):
+    monkeypatch.setattr("proxy.main.DECISION_PROVIDER", "cloudflare")
+    monkeypatch.setattr("proxy.main.CLOUDFLARE_ACCOUNT_ID", "account")
+    monkeypatch.setattr("proxy.main.CLOUDFLARE_API_TOKEN", "token")
+    monkeypatch.setattr("proxy.main.FILTER_EXCLUDED_TOPICS", "spoilers,crypto scams")
+
+    class CloudflareClient:
+        async def post(self, url, headers, json):
+            instructions = json["questions"]["allowed"]["instructions"]
+            assert "spoilers" in instructions
+            assert "crypto scams" in instructions
+            assert "politics" not in instructions
+            return type("Response", (), {
+                "raise_for_status": lambda self: None,
+                "json": lambda self: {"result": {"answers": {"allowed": {"noul": 0.8}}}},
+            })()
+
+    answers = await decision_answers("A post to classify", CloudflareClient())
+    assert answers["allowed"] == 0.8
+
+
+def test_cache_key_changes_with_filter_topics(monkeypatch):
+    monkeypatch.setattr("proxy.main.FILTER_EXCLUDED_TOPICS", "politics")
+    first = proxy_main.cache_key("same post")
+    monkeypatch.setattr("proxy.main.FILTER_EXCLUDED_TOPICS", "spoilers")
+    assert proxy_main.cache_key("same post") != first
+
+
 async def test_ready_probes_redlib(monkeypatch):
     class ReadyClient:
         async def get(self, url):
