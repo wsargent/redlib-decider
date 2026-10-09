@@ -59,4 +59,17 @@ REDLIB_URL=http://127.0.0.1:8081 DECIDER_URL=http://127.0.0.1:8099 \
 - Uncached posts are classified concurrently with a bounded `DECIDER_CONCURRENCY` setting (default `2`) to keep listing pages responsive without overwhelming the local model.
 - `DECISION_CACHE_SIZE` bounds both the in-memory cache and the persistent SQLite cache. The oldest persistent decisions are pruned after each new decision.
 - Only HTML GET responses are filtered. Assets and non-GET requests are passed through.
-- The Compose Decider uses CPU-only Torch. On an Apple-silicon Mac, MLX can be substantially faster when Decider runs natively outside Docker. Install the Decider MLX extra as described in the [Strands Decider documentation](https://github.com/strands-labs/strands-decider#getting-started), then start its HTTP server with `strands-decider serve StrandsAgents/strands-decider-2B-hobson-v21 --device mlx --host 0.0.0.0 --port 8099`. To use that native server from the proxy container, the proxy must be configured to reach the host (for example, `DECIDER_URL=http://host.docker.internal:8099`) and the Compose `decider` dependency should be removed or disabled. The proxy contract is unchanged.
+- The Compose Decider uses CPU-only Torch. On an Apple-silicon Mac, MLX can be substantially faster when Decider runs natively outside Docker. To use that setup, install the MLX extra on the Mac, start the native server, and launch the remaining services with the included override:
+
+  ```sh
+  uv pip install 'strands-decider[mlx]'
+  strands-decider serve StrandsAgents/strands-decider-2B-hobson-v21 --device mlx --host 0.0.0.0 --port 8099
+  ```
+
+  In another terminal:
+
+  ```sh
+  docker compose -f compose.yaml -f compose.native-mlx.yaml up --build
+  ```
+
+  The override disables the containerized Decider and points the proxy at `host.docker.internal:8099`. Stop the native server separately when finished. The proxy contract is unchanged.

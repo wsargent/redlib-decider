@@ -1,0 +1,12 @@
+# Run Strands Decider natively on an Apple-silicon Mac with MLX.
+# Start the native server first, then use:
+#   docker compose -f compose.yaml -f compose.native-mlx.yaml up --build
+services:
+  decider:
+    profiles:
+      - local-decider
+
+  proxy:
+    environment:
+      DECIDER_URL: http://host.docker.internal:8099
+    depends_on: !reset []
