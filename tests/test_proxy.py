@@ -1,4 +1,4 @@
-from proxy.main import filter_html
+from proxy.main import decision_answers, filter_html
 
 
 class FakeResponse:
@@ -24,6 +24,25 @@ class FakeResponse:
         }
 
 
+class OpenAIResponse:
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {"answers": [{"name": name, "type": "predicate", "probability": 0.25} for name in ("quality", "political", "death", "relationship", "cute_animal")]}
+
+
+class OpenAIClient:
+    def __init__(self):
+        self.url = None
+        self.request = None
+
+    async def post(self, url, headers, json):
+        self.url = url
+        self.request = json
+        return OpenAIResponse()
+
+
 class FakeClient:
     async def post(self, url, json):
         title = json["state"].lower()
@@ -33,6 +52,17 @@ class FakeClient:
             relationship=0.9 if "breakup" in title else 0.1,
             cute_animal=0.9 if "cat" in title else 0.1,
         )
+
+
+async def test_openai_decisions_payload(monkeypatch):
+    monkeypatch.setattr("proxy.main.DECISION_PROVIDER", "openai")
+    monkeypatch.setattr("proxy.main.OPENAI_API_KEY", "test-key")
+    client = OpenAIClient()
+    answers = await decision_answers("A post to classify", client)
+    assert client.url.endswith("/decisions")
+    assert client.request["model"] == "gpt-6-luna"
+    assert {q["name"] for q in client.request["questions"]} == {"quality", "political", "death", "relationship", "cute_animal"}
+    assert answers["cute_animal"] == 0.25
 
 
 async def test_filter_removes_low_quality_and_political_posts():

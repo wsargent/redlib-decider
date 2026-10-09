@@ -42,9 +42,15 @@ services:
       context: .
       dockerfile: Dockerfile.proxy
     restart: unless-stopped
+    volumes:
+      - proxy_decision_cache:/data
     environment:
       REDLIB_URL: http://redlib:8080
       DECIDER_URL: http://decider:8099
+      DECISION_PROVIDER: ${DECISION_PROVIDER:-local}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-6-luna}
       QUALITY_THRESHOLD: ${QUALITY_THRESHOLD:-0.55}
       POLITICS_THRESHOLD: ${POLITICS_THRESHOLD:-0.50}
       DEATH_THRESHOLD: ${DEATH_THRESHOLD:-0.50}
@@ -52,6 +58,7 @@ services:
       CUTE_ANIMAL_THRESHOLD: ${CUTE_ANIMAL_THRESHOLD:-0.50}
       DECIDER_TIMEOUT: ${DECIDER_TIMEOUT:-20}
       DECISION_CACHE_SIZE: ${DECISION_CACHE_SIZE:-512}
+      DECIDER_CONCURRENCY: ${DECIDER_CONCURRENCY:-2}
     depends_on:
       redlib:
         condition: service_healthy
@@ -64,6 +71,7 @@ services:
 
 volumes:
   decider_model_cache:
+  proxy_decision_cache:
 
 networks:
   redlib:

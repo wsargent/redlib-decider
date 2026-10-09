@@ -42,6 +42,8 @@ uv sync
 uv run uvicorn proxy.main:app --reload
 ```
 
+The proxy supports two decision providers. The default `DECISION_PROVIDER=local` uses the bundled Strands Decider. Set `DECISION_PROVIDER=openai` and provide `OPENAI_API_KEY` to use the OpenAI Decisions API instead; the default model is `gpt-6-luna`, and `OPENAI_BASE_URL` can point to a compatible endpoint. Both providers receive the same five predicate questions in one request.
+
 The local proxy expects Redlib at `http://redlib:8080` and Decider at `http://decider:8099` by default. Override those for local services:
 
 ```sh
@@ -54,5 +56,6 @@ REDLIB_URL=http://127.0.0.1:8081 DECIDER_URL=http://127.0.0.1:8099 \
 - Redlib has no post-filter extension point, so the proxy filters rendered HTML using Redlib's current `.post` selectors. If Redlib changes its markup, update `proxy/main.py`.
 - `redlib.env` contains only Redlib settings. Proxy and Decider settings belong in `.env` and Compose's `environment` block.
 - The classifier evaluates title, community, preview, score, and comment text. It removes posts classified as political, including political parties, elections, government, geopolitical conflicts, and political commentary. It does not fetch linked pages or media.
+- Uncached posts are classified concurrently with a bounded `DECIDER_CONCURRENCY` setting (default `2`) to keep listing pages responsive without overwhelming the local model.
 - Only HTML GET responses are filtered. Assets and non-GET requests are passed through.
 - The model uses CPU by default in this Compose setup. A future Linux/Proxmox deployment can add a GPU-specific Decider image or device configuration without changing the proxy contract.
