@@ -14,8 +14,9 @@ The proxy is deliberately a fail-open filter: while the model is downloading, wa
 
 ## Requirements
 
-- Docker Desktop on macOS (Apple Silicon and Intel are supported by the Redlib image).
+- Docker Desktop on macOS.
 - `uv` for local Python tooling. The containers use `uv` and `uvx` too.
+- Network access to pull the Redlib and Decider images.
 
 ## Run it
 
@@ -24,7 +25,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Open <http://127.0.0.1:8080>. The first Decider start downloads the model and can take several minutes; the proxy remains available and fails open during that time.
+Open <http://127.0.0.1:8080>. The first startup pulls the Redlib image and downloads the Decider model, so it can take several minutes. The proxy remains available and fails open while Decider is warming up. Redlib uses the source-built `tagliasteel/redlib:latest` image referenced by the Ansible deployment because the prebuilt `quay.io/redlib/redlib:latest` image is currently unreliable with Reddit OAuth. It is forced to IPv4 to avoid a class of Reddit OAuth failures.
 
 To stop it:
 
@@ -51,6 +52,7 @@ REDLIB_URL=http://127.0.0.1:8081 DECIDER_URL=http://127.0.0.1:8099 \
 ## Notes and limitations
 
 - Redlib has no post-filter extension point, so the proxy filters rendered HTML using Redlib's current `.post` selectors. If Redlib changes its markup, update `proxy/main.py`.
+- `redlib.env` contains only Redlib settings. Proxy and Decider settings belong in `.env` and Compose's `environment` block.
 - The classifier evaluates title, community, preview, score, and comment text. It does not fetch linked pages or media.
 - Only HTML GET responses are filtered. Assets and non-GET requests are passed through.
 - The model uses CPU by default in this Compose setup. A future Linux/Proxmox deployment can add a GPU-specific Decider image or device configuration without changing the proxy contract.

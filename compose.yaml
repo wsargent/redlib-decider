@@ -1,16 +1,14 @@
 services:
   redlib:
-    image: quay.io/redlib/redlib:latest
+    image: tagliasteel/redlib:latest
     restart: unless-stopped
-    user: nobody
     read_only: true
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
     env_file:
-      - path: .env
-        required: false
+      - redlib.env
     expose:
       - "8080"
     networks:
