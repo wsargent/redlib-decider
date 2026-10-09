@@ -24,7 +24,19 @@ To stop it:
 docker compose down
 ```
 
-To change the filtering content, edit `FILTER_EXCLUDED_TOPICS` in `.env` as a comma-separated list and restart. The default excludes politics, death or grief, divorce or breakups, and cute animals. `ALLOWED_THRESHOLD` is the minimum probability that the complete post is allowed; higher values hide more posts. `0.50` is a practical starting point, not a validated model boundary.
+To change the filtering content, edit `FILTER_EXCLUDED_TOPICS` in `.env` as a comma-separated list and restart. The default is:
+
+```env
+FILTER_EXCLUDED_TOPICS=politics,death or grief,divorce or breakups,cute animals
+```
+
+For example, to exclude politics and spoilers instead:
+
+```env
+FILTER_EXCLUDED_TOPICS=politics,spoilers
+```
+
+`ALLOWED_THRESHOLD` is the minimum probability that the complete post is allowed; higher values hide more posts. `0.50` is a practical starting point, not a validated model boundary.
 
 ## More documentation
 
