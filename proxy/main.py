@@ -28,6 +28,10 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-6-luna")
 CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
 CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN", "")
 CLOUDFLARE_MODEL = os.getenv("CLOUDFLARE_MODEL", "clef-flash")
+FILTER_EXCLUDED_TOPICS = os.getenv(
+    "FILTER_EXCLUDED_TOPICS",
+    "politics,death or grief,divorce or breakups,cute animals",
+)
 
 SKIP_PREFIXES = ("/static/", "/css/", "/js/", "/favicon")
 
@@ -112,7 +116,39 @@ def post_text(post) -> str:
     return "\n".join(parts)[:6000]
 
 
-ALLOWED_INSTRUCTIONS = """Should this Reddit post be shown to a reader seeking informative, non-political content without death or grief, divorce or breakups, or cute-animal content? Answer true only when all requirements are met: the post has meaningful substance; it is not substantially about politics, elections, government, geopolitical conflict, death, dying, bereavement, grief, funerals, terminal illness, divorce, separation, breakups, infidelity, romantic conflict, or cute, adorable, wholesome, or amusing animals."""
+DEFAULT_TOPIC_DETAILS = {
+    "politics": "politics, elections, government, or geopolitical conflict",
+    "death or grief": "death, dying, bereavement, grief, funerals, or terminal illness",
+    "divorce or breakups": "divorce, separation, breakups, infidelity, or romantic conflict",
+    "cute animals": "cute, adorable, wholesome, or amusing animals",
+}
+
+
+def excluded_topics() -> list[str]:
+    return [topic.strip() for topic in FILTER_EXCLUDED_TOPICS.split(",") if topic.strip()]
+
+
+def topic_description(topic: str) -> str:
+    return DEFAULT_TOPIC_DETAILS.get(topic.lower(), topic)
+
+
+def allowed_instructions() -> str:
+    topics = excluded_topics()
+    topic_text = ", ".join(topics) if topics else "no additional topic"
+    details = ", ".join(topic_description(topic) for topic in topics)
+    return (
+        f"Should this Reddit post be shown to a reader seeking informative content without {topic_text}? "
+        f"Answer true only when all requirements are met: the post has meaningful substance; "
+        f"it is not substantially about {details or 'any excluded topic'}."
+    )
+
+
+def decision_criteria() -> dict[str, str]:
+    topics = ", ".join(excluded_topics()) or "any excluded topic"
+    return {
+        "true": "The post has meaningful substance and is not substantially about any excluded category.",
+        "false": f"The post is low-quality or substantially concerns {topics}.",
+    }
 
 
 async def decision_answers(text: str, client: httpx.AsyncClient) -> dict[str, float]:
@@ -125,7 +161,7 @@ async def decision_answers(text: str, client: httpx.AsyncClient) -> dict[str, fl
             json={
                 "model": CLOUDFLARE_MODEL,
                 "state": text,
-                "questions": {"allowed": {"type": "noul", "instructions": ALLOWED_INSTRUCTIONS}},
+                "questions": {"allowed": {"type": "noul", "instructions": allowed_instructions()}},
             },
         )
         response.raise_for_status()
@@ -134,7 +170,7 @@ async def decision_answers(text: str, client: httpx.AsyncClient) -> dict[str, fl
     if DECISION_PROVIDER == "openai":
         if not OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY is required when DECISION_PROVIDER=openai")
-        questions = [{"type": "predicate", "name": "allowed", "instructions": ALLOWED_INSTRUCTIONS}]
+        questions = [{"type": "predicate", "name": "allowed", "instructions": allowed_instructions()}]
         response = await client.post(
             f"{OPENAI_BASE_URL}/decisions",
             headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
@@ -149,11 +185,8 @@ async def decision_answers(text: str, client: httpx.AsyncClient) -> dict[str, fl
         "questions": {
             "allowed": {
                 "type": "noul",
-                "instructions": ALLOWED_INSTRUCTIONS,
-                "criteria": {
-                    "true": "The post has meaningful substance and is not substantially about any excluded category.",
-                    "false": "The post is low-quality or substantially concerns politics, death or grief, divorce or breakups, or cute animals.",
-                },
+                "instructions": allowed_instructions(),
+                "criteria": decision_criteria(),
             }
         },
     }
@@ -164,7 +197,9 @@ async def decision_answers(text: str, client: httpx.AsyncClient) -> dict[str, fl
 
 
 def cache_key(text: str) -> str:
-    return hashlib.sha256(f"{DECISION_PROVIDER}:{OPENAI_MODEL}:{text}".encode()).hexdigest()
+    return hashlib.sha256(
+        f"{DECISION_PROVIDER}:{OPENAI_MODEL}:{FILTER_EXCLUDED_TOPICS}:{text}".encode()
+    ).hexdigest()
 
 
 def store_decision(key: str, result: bool) -> None:

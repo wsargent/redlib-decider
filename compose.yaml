@@ -56,6 +56,7 @@ services:
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
       CLOUDFLARE_MODEL: ${CLOUDFLARE_MODEL:-clef-flash}
       ALLOWED_THRESHOLD: ${ALLOWED_THRESHOLD:-0.50}
+      FILTER_EXCLUDED_TOPICS: ${FILTER_EXCLUDED_TOPICS:-politics,death or grief,divorce or breakups,cute animals}
       DECIDER_TIMEOUT: ${DECIDER_TIMEOUT:-20}
       DECISION_CACHE_SIZE: ${DECISION_CACHE_SIZE:-512}
       DECISION_DB: ${DECISION_DB:-/data/decisions.sqlite3}

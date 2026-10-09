@@ -9,7 +9,7 @@ The proxy supports four decision providers. The primary provider is `DECISION_PR
 
 The Codex path batches a page into one structured CLI request. The proxy also exposes Prometheus-compatible metrics at `/metrics`. The Codex adapter listens on port `8098` by default; override it with `CODEX_ADAPTER_PORT`, and override its model with `CODEX_MODEL` (default `gpt-6-luna`).
 
-The local-provider proxy expects Redlib at `http://redlib:8080` and the local Decider at `http://decider:8099` by default. Override those when using the local provider:
+The filtering policy is controlled by `FILTER_EXCLUDED_TOPICS`, a comma-separated list in `.env`; changing it causes new cache keys, so old decisions are not reused under the new policy. The local-provider proxy expects Redlib at `http://redlib:8080` and the local Decider at `http://decider:8099` by default. Override those when using the local provider:
 
 ```sh
 REDLIB_URL=http://127.0.0.1:8081 DECIDER_URL=http://127.0.0.1:8099 \
