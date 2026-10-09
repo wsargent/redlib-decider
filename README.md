@@ -42,8 +42,7 @@ uv sync
 uv run uvicorn proxy.main:app --reload
 ```
 
-The proxy supports two decision providers. The default `DECISION_PROVIDER=local` uses the bundled Strands Decider. Set `DECISION_PROVIDER=openai` and provide `OPENAI_API_KEY` to use the OpenAI Decisions API instead; the default model is `gpt-6-luna`, and `OPENAI_BASE_URL` can point to a compatible endpoint. Both providers receive one `allowed` predicate in each request.
-
+The proxy supports three decision providers. The default `DECISION_PROVIDER=local` uses the bundled Strands Decider. Set `DECISION_PROVIDER=openai` and provide `OPENAI_API_KEY` to use the OpenAI Decisions API. Set `DECISION_PROVIDER=codex` to use the native Codex adapter with the subscription-backed `gpt-6-luna` model; start it with `./scripts/start-native-codex.sh`. The Codex path batches a page into one structured CLI request. The proxy also exposes Prometheus-compatible metrics at `/metrics`. The Codex adapter listens on port `8098` by default; override it with `CODEX_ADAPTER_PORT`, and override its model with `CODEX_MODEL` (default `gpt-6-luna`).
 The local proxy expects Redlib at `http://redlib:8080` and Decider at `http://decider:8099` by default. Override those for local services:
 
 ```sh

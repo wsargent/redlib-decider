@@ -79,6 +79,33 @@ async def test_filter_removes_detail_page_post():
     assert 'id="detail"' not in result
 
 
+async def test_codex_batches_uncached_posts(monkeypatch):
+    monkeypatch.setattr(proxy_main, "DECISION_PROVIDER", "codex")
+    monkeypatch.setattr(proxy_main, "CODEX_ADAPTER_URL", "http://codex")
+
+    class CodexClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def post(self, url, json):
+            self.calls += 1
+            assert url == "http://codex/decide"
+            return type("Response", (), {
+                "raise_for_status": lambda self: None,
+                "json": lambda self: {"decisions": [
+                    {"id": post["id"], "allowed": post["id"] == "0"}
+                    for post in json["posts"]
+                ]},
+            })()
+
+    client = CodexClient()
+    html = '<main id="posts"><div class="post" id="good"><h2 class="post_title">Good</h2></div><div class="post" id="bad"><h2 class="post_title">Bad</h2></div></main>'
+    result = await filter_html(html, client)
+    assert client.calls == 1
+    assert 'id="good"' in result
+    assert 'id="bad"' not in result
+
+
 async def test_filter_fails_closed_when_decider_is_unavailable():
     class UnavailableClient:
         async def post(self, url, json):

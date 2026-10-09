@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string"},
+          "allowed": {"type": "boolean"}
+        },
+        "required": ["id", "allowed"]
+      }
+    }
+  },
+  "required": ["decisions"]
+}

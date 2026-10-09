@@ -15,6 +15,7 @@ from fastapi import FastAPI, Request, Response
 
 REDLIB_URL = os.getenv("REDLIB_URL", "http://redlib:8080").rstrip("/")
 DECIDER_URL = os.getenv("DECIDER_URL", "http://decider:8099").rstrip("/")
+CODEX_ADAPTER_URL = os.getenv("CODEX_ADAPTER_URL", "http://host.docker.internal:8098").rstrip("/")
 ALLOWED_THRESHOLD = float(os.getenv("ALLOWED_THRESHOLD", "0.50"))
 DECIDER_TIMEOUT = float(os.getenv("DECIDER_TIMEOUT", "20"))
 CACHE_SIZE = int(os.getenv("DECISION_CACHE_SIZE", "512"))
@@ -46,6 +47,17 @@ class DecisionCache:
 
 
 cache = DecisionCache(OrderedDict())
+
+METRICS = {
+    "page_requests": 0,
+    "page_seconds": 0.0,
+    "posts_seen": 0,
+    "cache_hits": 0,
+    "decisions": 0,
+    "decision_seconds": 0.0,
+    "decision_failures": 0,
+    "batch_requests": 0,
+}
 
 
 PERSISTENT_CACHE = True
@@ -133,35 +145,87 @@ async def decision_answers(text: str, client: httpx.AsyncClient) -> dict[str, fl
     return {"allowed": float(answer["noul"])}
 
 
+def cache_key(text: str) -> str:
+    return hashlib.sha256(f"{DECISION_PROVIDER}:{OPENAI_MODEL}:{text}".encode()).hexdigest()
+
+
+def store_decision(key: str, result: bool) -> None:
+    cache.put(key, result)
+    persist_decision(key, result)
+
+
 async def is_allowed(text: str, client: httpx.AsyncClient) -> bool:
-    key = hashlib.sha256(f"{DECISION_PROVIDER}:{OPENAI_MODEL}:{text}".encode()).hexdigest()
+    key = cache_key(text)
     cached = cache.get(key)
     if cached is not None:
+        METRICS["cache_hits"] += 1
         return cached
-
+    started = asyncio.get_running_loop().time()
     try:
         answers = await decision_answers(text, client)
         result = answers["allowed"] >= ALLOWED_THRESHOLD
+        METRICS["decisions"] += 1
     except (httpx.HTTPError, KeyError, TypeError, ValueError, RuntimeError):
-        # Do not silently bypass explicit exclusion rules when the model is
-        # unavailable. The Compose dependency keeps normal startup gated on
-        # Decider readiness; this protects later model failures.
+        METRICS["decision_failures"] += 1
         result = False
-    cache.put(key, result)
-    persist_decision(key, result)
+    METRICS["decision_seconds"] += asyncio.get_running_loop().time() - started
+    store_decision(key, result)
     return result
 
 
+async def batch_codex(posts, client: httpx.AsyncClient) -> dict[str, bool]:
+    uncached = []
+    results = {}
+    for index, post in enumerate(posts):
+        text = post_text(post)
+        key = cache_key(text)
+        cached = cache.get(key)
+        if cached is not None:
+            METRICS["cache_hits"] += 1
+            results[str(index)] = cached
+        else:
+            uncached.append({"id": str(index), "text": text, "key": key})
+    if not uncached:
+        return results
+    started = asyncio.get_running_loop().time()
+    METRICS["batch_requests"] += 1
+    try:
+        response = await client.post(f"{CODEX_ADAPTER_URL}/decide", json={"posts": uncached})
+        response.raise_for_status()
+        decisions = response.json()["decisions"]
+        by_id = {item["id"]: bool(item["allowed"]) for item in decisions}
+        for item in uncached:
+            result = by_id[item["id"]]
+            results[item["id"]] = result
+            store_decision(item["key"], result)
+            METRICS["decisions"] += 1
+    except (httpx.HTTPError, KeyError, TypeError, ValueError):
+        METRICS["decision_failures"] += len(uncached)
+        for item in uncached:
+            results[item["id"]] = False
+            store_decision(item["key"], False)
+    METRICS["decision_seconds"] += asyncio.get_running_loop().time() - started
+    return results
+
+
 async def filter_html(html: str, client: httpx.AsyncClient) -> str:
+    page_started = asyncio.get_running_loop().time()
     soup = BeautifulSoup(html, "html.parser")
     posts = soup.select("#posts .post") or soup.select(".post")
-    semaphore = asyncio.Semaphore(DECIDER_CONCURRENCY)
+    METRICS["page_requests"] += 1
+    METRICS["posts_seen"] += len(posts)
+    if DECISION_PROVIDER == "codex":
+        results = await batch_codex(posts, client)
+        allowed = [results[str(index)] for index in range(len(posts))]
+    else:
+        semaphore = asyncio.Semaphore(DECIDER_CONCURRENCY)
 
-    async def classify(post) -> bool:
-        async with semaphore:
-            return await is_allowed(post_text(post), client)
+        async def classify(post) -> bool:
+            async with semaphore:
+                return await is_allowed(post_text(post), client)
 
-    allowed = await asyncio.gather(*(classify(post) for post in posts))
+        allowed = await asyncio.gather(*(classify(post) for post in posts))
+    METRICS["page_seconds"] += asyncio.get_running_loop().time() - page_started
     for post, should_show in zip(posts, allowed):
         if not should_show:
             separator = post.find_next_sibling("hr", class_="sep")
@@ -184,6 +248,16 @@ app = FastAPI(title="Redlib Decider Proxy", lifespan=lifespan)
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+async def metrics() -> Response:
+    lines = []
+    for name, value in METRICS.items():
+        metric_type = "counter" if name.endswith(("requests", "seen", "hits", "decisions", "failures")) else "gauge"
+        lines.append(f"# TYPE redlib_decider_{name} {metric_type}")
+        lines.append(f"redlib_decider_{name} {value}")
+    return Response("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 
 @app.api_route("/{path:path}", methods=["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"])

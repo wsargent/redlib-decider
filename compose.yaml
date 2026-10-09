@@ -48,6 +48,7 @@ services:
       REDLIB_URL: http://redlib:8080
       DECIDER_URL: http://decider:8099
       DECISION_PROVIDER: ${DECISION_PROVIDER:-local}
+      CODEX_ADAPTER_URL: ${CODEX_ADAPTER_URL:-http://host.docker.internal:8098}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-6-luna}

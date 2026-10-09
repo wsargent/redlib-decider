@@ -1,0 +1,12 @@
+# Run the Codex CLI natively on macOS and keep Redlib/proxy in Docker.
+# Start with: ./scripts/start-native-codex.sh
+services:
+  decider:
+    profiles:
+      - local-decider
+
+  proxy:
+    environment:
+      DECISION_PROVIDER: codex
+      CODEX_ADAPTER_URL: http://host.docker.internal:8098
+    depends_on: !reset []
