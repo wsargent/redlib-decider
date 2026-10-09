@@ -15,11 +15,7 @@ from fastapi import FastAPI, Request, Response
 
 REDLIB_URL = os.getenv("REDLIB_URL", "http://redlib:8080").rstrip("/")
 DECIDER_URL = os.getenv("DECIDER_URL", "http://decider:8099").rstrip("/")
-QUALITY_THRESHOLD = float(os.getenv("QUALITY_THRESHOLD", "0.55"))
-POLITICS_THRESHOLD = float(os.getenv("POLITICS_THRESHOLD", "0.50"))
-DEATH_THRESHOLD = float(os.getenv("DEATH_THRESHOLD", "0.50"))
-RELATIONSHIP_THRESHOLD = float(os.getenv("RELATIONSHIP_THRESHOLD", "0.50"))
-CUTE_ANIMAL_THRESHOLD = float(os.getenv("CUTE_ANIMAL_THRESHOLD", "0.50"))
+ALLOWED_THRESHOLD = float(os.getenv("ALLOWED_THRESHOLD", "0.50"))
 DECIDER_TIMEOUT = float(os.getenv("DECIDER_TIMEOUT", "20"))
 CACHE_SIZE = int(os.getenv("DECISION_CACHE_SIZE", "512"))
 DECIDER_CONCURRENCY = int(os.getenv("DECIDER_CONCURRENCY", "2"))
@@ -101,23 +97,14 @@ def post_text(post) -> str:
     return "\n".join(parts)[:6000]
 
 
-QUESTIONS = {
-    "quality": "Is this Reddit post worth showing to a reader seeking informative, original, or engaging content?",
-    "political": "Is this Reddit post substantially about politics or political controversy?",
-    "death": "Is this Reddit post substantially about death, dying, bereavement, grief, funerals, or serious terminal illness?",
-    "relationship": "Is this Reddit post substantially about divorce, separation, a breakup, or a failing romantic relationship?",
-    "cute_animal": "Is this Reddit post primarily presenting a cute, adorable, wholesome, or amusing animal?",
-}
+ALLOWED_INSTRUCTIONS = """Should this Reddit post be shown to a reader seeking informative, non-political content without death or grief, divorce or breakups, or cute-animal content? Answer true only when all requirements are met: the post has meaningful substance; it is not substantially about politics, elections, government, geopolitical conflict, death, dying, bereavement, grief, funerals, terminal illness, divorce, separation, breakups, infidelity, romantic conflict, or cute, adorable, wholesome, or amusing animals."""
 
 
 async def decision_answers(text: str, client: httpx.AsyncClient) -> dict[str, float]:
     if DECISION_PROVIDER == "openai":
         if not OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY is required when DECISION_PROVIDER=openai")
-        questions = [
-            {"type": "predicate", "name": name, "instructions": instruction}
-            for name, instruction in QUESTIONS.items()
-        ]
+        questions = [{"type": "predicate", "name": "allowed", "instructions": ALLOWED_INSTRUCTIONS}]
         response = await client.post(
             f"{OPENAI_BASE_URL}/decisions",
             headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
@@ -130,40 +117,20 @@ async def decision_answers(text: str, client: httpx.AsyncClient) -> dict[str, fl
     request = {
         "state": text,
         "questions": {
-            "quality": {
+            "allowed": {
                 "type": "noul",
-                "instructions": QUESTIONS["quality"],
+                "instructions": ALLOWED_INSTRUCTIONS,
                 "criteria": {
-                    "true": "The post has meaningful substance, useful information, a clear question, original insight, or genuine discussion value.",
-                    "false": "The post is low-effort, repetitive, spammy, engagement bait, or has little useful content.",
+                    "true": "The post has meaningful substance and is not substantially about any excluded category.",
+                    "false": "The post is low-quality or substantially concerns politics, death or grief, divorce or breakups, or cute animals.",
                 },
-            },
-            "political": {
-                "type": "noul",
-                "instructions": QUESTIONS["political"],
-                "criteria": {"true": "The post concerns elections, political parties, politicians, government policy, legislation, political movements, geopolitical conflict, or political commentary.", "false": "The post is not substantially political."},
-            },
-            "death": {
-                "type": "noul",
-                "instructions": QUESTIONS["death"],
-                "criteria": {"true": "The post substantially concerns someone or an animal dying, a death, bereavement, grief, a funeral, or terminal illness.", "false": "The post is not substantially about death or grief."},
-            },
-            "relationship": {
-                "type": "noul",
-                "instructions": QUESTIONS["relationship"],
-                "criteria": {"true": "The post concerns divorce, separation, a breakup, infidelity, or serious romantic relationship conflict.", "false": "The post is not substantially about divorce, a breakup, or romantic relationship conflict."},
-            },
-            "cute_animal": {
-                "type": "noul",
-                "instructions": QUESTIONS["cute_animal"],
-                "criteria": {"true": "The post primarily presents a cute, adorable, wholesome, or amusing animal, including a pet photo or animal video.", "false": "The post is not primarily cute-animal content."},
-            },
+            }
         },
     }
     response = await client.post(f"{DECIDER_URL}/v1/systemone", json=request)
     response.raise_for_status()
-    answers = response.json()["answers"]
-    return {name: float(answers[name]["noul"]) for name in QUESTIONS}
+    answer = response.json()["answers"]["allowed"]
+    return {"allowed": float(answer["noul"])}
 
 
 async def is_allowed(text: str, client: httpx.AsyncClient) -> bool:
@@ -174,18 +141,7 @@ async def is_allowed(text: str, client: httpx.AsyncClient) -> bool:
 
     try:
         answers = await decision_answers(text, client)
-        quality = answers["quality"]
-        political = answers["political"]
-        death = answers["death"]
-        relationship = answers["relationship"]
-        cute_animal = answers["cute_animal"]
-        result = (
-            quality >= QUALITY_THRESHOLD
-            and political < POLITICS_THRESHOLD
-            and death < DEATH_THRESHOLD
-            and relationship < RELATIONSHIP_THRESHOLD
-            and cute_animal < CUTE_ANIMAL_THRESHOLD
-        )
+        result = answers["allowed"] >= ALLOWED_THRESHOLD
     except (httpx.HTTPError, KeyError, TypeError, ValueError, RuntimeError):
         # Do not silently bypass explicit exclusion rules when the model is
         # unavailable. The Compose dependency keeps normal startup gated on

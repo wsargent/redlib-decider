@@ -5,26 +5,14 @@ from proxy.main import decision_answers, filter_html
 
 
 class FakeResponse:
-    def __init__(self, quality, political, death=0.1, relationship=0.1, cute_animal=0.1):
-        self.quality = quality
-        self.political = political
-        self.death = death
-        self.relationship = relationship
-        self.cute_animal = cute_animal
+    def __init__(self, allowed):
+        self.allowed = allowed
 
     def raise_for_status(self):
         pass
 
     def json(self):
-        return {
-            "answers": {
-                "quality": {"noul": self.quality},
-                "political": {"noul": self.political},
-                "death": {"noul": self.death},
-                "relationship": {"noul": self.relationship},
-                "cute_animal": {"noul": self.cute_animal},
-            }
-        }
+        return {"answers": {"allowed": {"noul": self.allowed}}}
 
 
 class OpenAIResponse:
@@ -32,7 +20,7 @@ class OpenAIResponse:
         pass
 
     def json(self):
-        return {"answers": [{"name": name, "type": "predicate", "probability": 0.25} for name in ("quality", "political", "death", "relationship", "cute_animal")]}
+        return {"answers": [{"name": "allowed", "type": "predicate", "probability": 0.75}]}
 
 
 class OpenAIClient:
@@ -50,10 +38,7 @@ class FakeClient:
     async def post(self, url, json):
         title = json["state"].lower()
         return FakeResponse(
-            quality=0.1 if "bad" in title else 0.9,
-            political=0.9 if "politics" in title else 0.1,
-            relationship=0.9 if "breakup" in title else 0.1,
-            cute_animal=0.9 if "cat" in title else 0.1,
+            allowed=0.1 if any(term in title for term in ("bad", "politics", "breakup", "cat")) else 0.9,
         )
 
 
@@ -76,8 +61,8 @@ async def test_openai_decisions_payload(monkeypatch):
     answers = await decision_answers("A post to classify", client)
     assert client.url.endswith("/decisions")
     assert client.request["model"] == "gpt-6-luna"
-    assert {q["name"] for q in client.request["questions"]} == {"quality", "political", "death", "relationship", "cute_animal"}
-    assert answers["cute_animal"] == 0.25
+    assert {q["name"] for q in client.request["questions"]} == {"allowed"}
+    assert answers["allowed"] == 0.75
 
 
 async def test_filter_removes_low_quality_and_political_posts():

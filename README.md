@@ -1,6 +1,6 @@
 # Redlib with a Strands Decider filter
 
-This project runs a local Redlib UI behind a small FastAPI proxy. The proxy sends each post card on Redlib listing pages to the local Strands Decider model and removes posts classified as low quality.
+This project runs a local Redlib UI behind a small FastAPI proxy. The proxy sends each post card on Redlib listing pages to the local Strands Decider model and removes posts that fail the configured allowed-content decision.
 
 ## Architecture
 
@@ -25,7 +25,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Open <http://127.0.0.1:8080>. The first startup pulls the Redlib image and downloads the Decider model, so it can take several minutes. The proxy remains available and fails open while Decider is warming up. The Decider Python package is installed during the Docker build and the model files are stored in the persistent `decider_model_cache` volume, so normal container recreation does not repeat those downloads. Redlib uses the source-built `tagliasteel/redlib:latest` image referenced by the Ansible deployment because the prebuilt `quay.io/redlib/redlib:latest` image is currently unreliable with Reddit OAuth. It is forced to IPv4 to avoid a class of Reddit OAuth failures.
+Open <http://127.0.0.1:8080>. The first startup pulls the Redlib image and downloads the Decider model, so it can take several minutes. The proxy remains available while Decider is warming up, but posts are removed until classification succeeds. The Decider Python package is installed during the Docker build and the model files are stored in the persistent `decider_model_cache` volume, so normal container recreation does not repeat those downloads. Redlib uses the source-built `tagliasteel/redlib:latest` image referenced by the Ansible deployment because the prebuilt `quay.io/redlib/redlib:latest` image is currently unreliable with Reddit OAuth. It is forced to IPv4 to avoid a class of Reddit OAuth failures.
 
 To stop it:
 
@@ -33,7 +33,7 @@ To stop it:
 docker compose down
 ```
 
-To change the filtering strictness, edit `.env` and restart. `QUALITY_THRESHOLD` is the minimum yes-probability from Decider; higher values hide more posts. `POLITICS_THRESHOLD` is the probability at which a post is treated as political and removed; `DEATH_THRESHOLD`, `RELATIONSHIP_THRESHOLD`, and `CUTE_ANIMAL_THRESHOLD` control removal of posts about death/grief, divorce or breakups, and cute animals. All default to `0.50` to remove borderline matches. These are practical starting points, not validated model boundaries.
+To change the filtering strictness, edit `.env` and restart. `ALLOWED_THRESHOLD` is the minimum probability that the complete post is allowed. Higher values hide more posts. The single decision covers quality, politics, death/grief, divorce/breakups, and cute animals. `0.50` is a practical starting point, not a validated model boundary.
 
 ## Local development with uv
 
@@ -42,7 +42,7 @@ uv sync
 uv run uvicorn proxy.main:app --reload
 ```
 
-The proxy supports two decision providers. The default `DECISION_PROVIDER=local` uses the bundled Strands Decider. Set `DECISION_PROVIDER=openai` and provide `OPENAI_API_KEY` to use the OpenAI Decisions API instead; the default model is `gpt-6-luna`, and `OPENAI_BASE_URL` can point to a compatible endpoint. Both providers receive the same five predicate questions in one request.
+The proxy supports two decision providers. The default `DECISION_PROVIDER=local` uses the bundled Strands Decider. Set `DECISION_PROVIDER=openai` and provide `OPENAI_API_KEY` to use the OpenAI Decisions API instead; the default model is `gpt-6-luna`, and `OPENAI_BASE_URL` can point to a compatible endpoint. Both providers receive one `allowed` predicate in each request.
 
 The local proxy expects Redlib at `http://redlib:8080` and Decider at `http://decider:8099` by default. Override those for local services:
 
@@ -55,7 +55,7 @@ REDLIB_URL=http://127.0.0.1:8081 DECIDER_URL=http://127.0.0.1:8099 \
 
 - Redlib has no post-filter extension point, so the proxy filters rendered HTML using Redlib's current `.post` selectors. If Redlib changes its markup, update `proxy/main.py`.
 - `redlib.env` contains only Redlib settings. Proxy and Decider settings belong in `.env` and Compose's `environment` block.
-- The classifier evaluates title, community, preview, score, and comment text. It removes posts classified as political, including political parties, elections, government, geopolitical conflicts, and political commentary. It does not fetch linked pages or media.
+- The classifier evaluates title, community, and preview text. It removes posts that are low-quality or substantially about politics, death or grief, divorce or breakups, or cute animals. It does not fetch linked pages or media.
 - Uncached posts are classified concurrently with a bounded `DECIDER_CONCURRENCY` setting (default `2`) to keep listing pages responsive without overwhelming the local model.
 - `DECISION_CACHE_SIZE` bounds both the in-memory cache and the persistent SQLite cache. The oldest persistent decisions are pruned after each new decision.
 - Only HTML GET responses are filtered. Assets and non-GET requests are passed through.
