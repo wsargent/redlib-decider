@@ -55,7 +55,7 @@ REDLIB_URL=http://127.0.0.1:8081 DECIDER_URL=http://127.0.0.1:8099 \
 - Redlib has no post-filter extension point, so the proxy filters rendered HTML using Redlib's current `.post` selectors. If Redlib changes its markup, update `proxy/main.py`.
 - `redlib.env` contains only Redlib settings. Proxy and Decider settings belong in `.env` and Compose's `environment` block.
 - The classifier evaluates title, community, and preview text. It removes posts that are low-quality or substantially about politics, death or grief, divorce or breakups, or cute animals. It does not fetch linked pages or media.
-- Uncached posts are classified concurrently with a bounded `DECIDER_CONCURRENCY` setting (default `2`) to keep listing pages responsive without overwhelming the local model.
+- Uncached posts are classified concurrently with a bounded `DECIDER_CONCURRENCY` setting (default `16`) to keep listing pages responsive. Cloudflare Clef Flash testing found 16 to be the fastest reliable setting; higher values caused intermittent request failures.
 - `DECISION_CACHE_SIZE` bounds both the in-memory cache and the persistent SQLite cache. The oldest persistent decisions are pruned after each new decision.
 - Only HTML GET responses are filtered. Assets and non-GET requests are passed through.
 - The Compose Decider uses CPU-only Torch. On an Apple-silicon Mac, MLX can be substantially faster when Decider runs natively outside Docker. To use that setup, install the MLX extra on the Mac, start the native server, and launch the remaining services with the included override:

@@ -59,7 +59,7 @@ services:
       DECIDER_TIMEOUT: ${DECIDER_TIMEOUT:-20}
       DECISION_CACHE_SIZE: ${DECISION_CACHE_SIZE:-512}
       DECISION_DB: ${DECISION_DB:-/data/decisions.sqlite3}
-      DECIDER_CONCURRENCY: ${DECIDER_CONCURRENCY:-2}
+      DECIDER_CONCURRENCY: ${DECIDER_CONCURRENCY:-16}
     depends_on:
       redlib:
         condition: service_healthy
