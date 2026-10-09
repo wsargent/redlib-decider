@@ -11,16 +11,19 @@ if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
   exit 1
 fi
 
-if ! command -v strands-decider >/dev/null 2>&1; then
-  if ! command -v uv >/dev/null 2>&1; then
-    echo "strands-decider is not installed and uv was not found in PATH." >&2
-    echo "Install uv, then rerun this script." >&2
-    exit 1
-  fi
-  echo "strands-decider is not installed; installing the MLX extra..."
-  uv pip install --system 'strands-decider[mlx]'
-  hash -r
+if ! command -v uv >/dev/null 2>&1; then
+  echo "uv is required to install the MLX-enabled Decider." >&2
+  echo "Install uv, then rerun this script." >&2
+  exit 1
 fi
+
+# The released PyPI package currently has no mlx extra. Install the extra from
+# the upstream source repository into an isolated uv tool environment. Force
+# this on every run so an earlier regular PyPI install cannot be reused.
+echo "Installing the MLX-enabled Decider from the upstream source..."
+uv tool install --force 'strands-decider[mlx] @ git+https://github.com/strands-labs/strands-decider.git'
+export PATH="$(uv tool dir --bin):${PATH}"
+hash -r
 
 if ! command -v strands-decider >/dev/null 2>&1; then
   echo "strands-decider installation completed, but the executable is not in PATH." >&2

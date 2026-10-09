@@ -61,10 +61,10 @@ REDLIB_URL=http://127.0.0.1:8081 DECIDER_URL=http://127.0.0.1:8099 \
 - Only HTML GET responses are filtered. Assets and non-GET requests are passed through.
 - The Compose Decider uses CPU-only Torch. On an Apple-silicon Mac, MLX can be substantially faster when Decider runs natively outside Docker. To use that setup, install the MLX extra on the Mac, start the native server, and launch the remaining services with the included override:
 
-  The startup script installs `strands-decider[mlx]` automatically when it is missing. Or install it manually before starting:
+  The startup script installs the MLX-enabled Decider from the upstream source repository automatically. If you install it manually, use an isolated tool environment:
 
   ```sh
-  uv pip install --system 'strands-decider[mlx]'
+  uv tool install 'strands-decider[mlx] @ git+https://github.com/strands-labs/strands-decider.git'
   ```
 
   Or use the startup script, which installs the dependency if needed, launches Decider, waits for `/health`, starts Docker, and stops Decider when Docker exits:
