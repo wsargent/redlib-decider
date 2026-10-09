@@ -1,0 +1,63 @@
+services:
+  redlib:
+    image: quay.io/redlib/redlib:latest
+    restart: unless-stopped
+    user: nobody
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    env_file:
+      - path: .env
+        required: false
+    expose:
+      - "8080"
+    networks:
+      - redlib
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "--tries=1", "http://localhost:8080/settings"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  decider:
+    build:
+      context: .
+      dockerfile: Dockerfile.decider
+    restart: unless-stopped
+    expose:
+      - "8099"
+    networks:
+      - redlib
+    healthcheck:
+      test: ["CMD", "uv", "run", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8099/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 2m
+
+  proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile.proxy
+    restart: unless-stopped
+    environment:
+      REDLIB_URL: http://redlib:8080
+      DECIDER_URL: http://decider:8099
+      QUALITY_THRESHOLD: ${QUALITY_THRESHOLD:-0.55}
+      DECIDER_TIMEOUT: ${DECIDER_TIMEOUT:-20}
+      DECISION_CACHE_SIZE: ${DECISION_CACHE_SIZE:-512}
+    depends_on:
+      redlib:
+        condition: service_healthy
+      decider:
+        condition: service_started
+    ports:
+      - "127.0.0.1:${PROXY_PORT:-8080}:8080"
+    networks:
+      - redlib
+
+networks:
+  redlib:
+    driver: bridge
