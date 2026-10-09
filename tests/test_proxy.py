@@ -1,7 +1,7 @@
 from sqlite_utils import Database
 
 import proxy.main as proxy_main
-from proxy.main import decision_answers, filter_html
+from proxy.main import app, decision_answers, filter_html
 
 
 class FakeResponse:
@@ -87,6 +87,17 @@ async def test_openai_decisions_payload(monkeypatch):
     assert client.request["model"] == "gpt-6-luna"
     assert {q["name"] for q in client.request["questions"]} == {"allowed"}
     assert answers["allowed"] == 0.75
+
+
+async def test_ready_probes_redlib(monkeypatch):
+    class ReadyClient:
+        async def get(self, url):
+            assert url.endswith("/settings")
+            return type("Response", (), {"raise_for_status": lambda self: None})()
+
+    app.state.client = ReadyClient()
+    response = await app.routes[[route.path for route in app.routes].index("/ready")].endpoint(type("Request", (), {"app": app})())
+    assert response.status_code == 200
 
 
 async def test_filter_removes_low_quality_and_political_posts():

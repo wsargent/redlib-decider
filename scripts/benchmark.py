@@ -55,14 +55,21 @@ def main() -> int:
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=180)
     parser.add_argument("--output", help="Write the JSON result to this file as well as stdout")
+    parser.add_argument("--concurrency", type=int, help="Expected DECIDER_CONCURRENCY setting for result labeling")
+    parser.add_argument("--require-fresh", action="store_true", help="Fail if the first request uses cached decisions")
     args = parser.parse_args()
     if args.requests < 1 or args.warmup < 0:
         parser.error("--requests must be positive and --warmup cannot be negative")
 
     try:
-        health_url = args.metrics_url.rsplit("/metrics", 1)[0] + "/health"
-        fetch(health_url, args.timeout)
+        base_url = args.metrics_url.rsplit("/metrics", 1)[0]
+        fetch(base_url + "/health", args.timeout)
+        ready_status, _, _ = fetch(base_url + "/ready", args.timeout)
+        if ready_status != 200:
+            raise RuntimeError(f"Redlib is not ready: HTTP {ready_status}; retry after it becomes healthy")
         before = metrics(args.metrics_url, args.timeout)
+        if args.require_fresh and before.get("redlib_decider_cache_hits", 0) > 0:
+            raise RuntimeError("benchmark cache is not fresh; use a unique DECISION_DB and restart the proxy")
         warmups = [fetch(args.url, args.timeout) for _ in range(args.warmup)]
         before_measurements = metrics(args.metrics_url, args.timeout)
         measurements = []
@@ -84,6 +91,7 @@ def main() -> int:
         "url": args.url,
         "requests": args.requests,
         "warmup": args.warmup,
+        "concurrency": args.concurrency,
         "warmup_results": [
             {"status": status, "bytes": size, "seconds": seconds}
             for status, size, seconds in warmups

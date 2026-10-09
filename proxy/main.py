@@ -268,6 +268,16 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/ready")
+async def ready(request: Request) -> Response:
+    try:
+        response = await request.app.state.client.get(f"{REDLIB_URL}/settings")
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        return Response(str(exc), status_code=503)
+    return Response('{"status":"ready"}', media_type="application/json")
+
+
 @app.get("/metrics")
 async def metrics() -> Response:
     lines = []
