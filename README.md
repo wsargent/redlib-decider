@@ -25,7 +25,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Open <http://127.0.0.1:8080>. The first startup pulls the Redlib image and downloads the Decider model, so it can take several minutes. The proxy remains available and fails open while Decider is warming up. Redlib uses the source-built `tagliasteel/redlib:latest` image referenced by the Ansible deployment because the prebuilt `quay.io/redlib/redlib:latest` image is currently unreliable with Reddit OAuth. It is forced to IPv4 to avoid a class of Reddit OAuth failures.
+Open <http://127.0.0.1:8080>. The first startup pulls the Redlib image and downloads the Decider model, so it can take several minutes. The proxy remains available and fails open while Decider is warming up. The Decider Python package is installed during the Docker build and the model files are stored in the persistent `decider_model_cache` volume, so normal container recreation does not repeat those downloads. Redlib uses the source-built `tagliasteel/redlib:latest` image referenced by the Ansible deployment because the prebuilt `quay.io/redlib/redlib:latest` image is currently unreliable with Reddit OAuth. It is forced to IPv4 to avoid a class of Reddit OAuth failures.
 
 To stop it:
 

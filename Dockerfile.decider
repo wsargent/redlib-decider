@@ -1,4 +1,16 @@
 FROM ghcr.io/astral-sh/uv:0.8.17-python3.11-bookworm-slim
-ENV UV_CACHE_DIR=/tmp/uv-cache PYTHONUNBUFFERED=1
+
+ENV UV_CACHE_DIR=/root/.cache/uv \
+    HF_HOME=/root/.cache/huggingface \
+    TRANSFORMERS_CACHE=/root/.cache/huggingface \
+    PYTHONUNBUFFERED=1
+
+# Install at build time so package downloads are retained in image layers.
+# Strands Decider has no `cpu` extra in the released package. Install the
+# CPU-only Torch wheel first so the resolver does not pull CUDA libraries.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system --index-url https://download.pytorch.org/whl/cpu torch \
+    && uv pip install --system --index-url https://pypi.org/simple strands-decider
+
 EXPOSE 8099
-CMD ["uvx", "--from", "strands-decider", "strands-decider", "serve", "StrandsAgents/strands-decider-2B-hobson-v21", "--port", "8099"]
+CMD ["strands-decider", "serve", "StrandsAgents/strands-decider-2B-hobson-v21", "--host", "0.0.0.0", "--port", "8099"]

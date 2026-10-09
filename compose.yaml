@@ -24,6 +24,8 @@ services:
       context: .
       dockerfile: Dockerfile.decider
     restart: unless-stopped
+    volumes:
+      - decider_model_cache:/root/.cache/huggingface
     expose:
       - "8099"
     networks:
@@ -59,6 +61,9 @@ services:
       - "127.0.0.1:${PROXY_PORT:-8080}:8080"
     networks:
       - redlib
+
+volumes:
+  decider_model_cache:
 
 networks:
   redlib:
