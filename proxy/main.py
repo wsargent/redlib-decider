@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
-import sqlite3
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -11,6 +10,7 @@ from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup
+from sqlite_utils import Database
 from fastapi import FastAPI, Request, Response
 
 REDLIB_URL = os.getenv("REDLIB_URL", "http://redlib:8080").rstrip("/")
@@ -59,10 +59,11 @@ def load_persistent_cache() -> None:
     global PERSISTENT_CACHE
     try:
         os.makedirs(os.path.dirname(DECISION_DB), exist_ok=True)
-        with sqlite3.connect(DECISION_DB) as db:
-            db.execute("CREATE TABLE IF NOT EXISTS decisions (key TEXT PRIMARY KEY, allowed INTEGER NOT NULL)")
-            for key, allowed in db.execute("SELECT key, allowed FROM decisions ORDER BY rowid DESC LIMIT ?", (CACHE_SIZE,)):
-                cache.put(key, bool(allowed))
+        db = Database(DECISION_DB)
+        table = db["decisions"]
+        table.create({"key": str, "allowed": int}, pk="key", if_not_exists=True)
+        for row in table.rows_where(order_by="rowid DESC", limit=CACHE_SIZE):
+            cache.put(row["key"], bool(row["allowed"]))
     except OSError:
         PERSISTENT_CACHE = False
 
@@ -71,15 +72,13 @@ def persist_decision(key: str, result: bool) -> None:
     if not PERSISTENT_CACHE:
         return
     try:
-        with sqlite3.connect(DECISION_DB) as db:
-            db.execute("CREATE TABLE IF NOT EXISTS decisions (key TEXT PRIMARY KEY, allowed INTEGER NOT NULL)")
-            db.execute("INSERT OR REPLACE INTO decisions(key, allowed) VALUES (?, ?)", (key, int(result)))
-            db.execute(
-                "DELETE FROM decisions WHERE key NOT IN "
-                "(SELECT key FROM decisions ORDER BY rowid DESC LIMIT ?)",
-                (CACHE_SIZE,),
-            )
-            db.commit()
+        db = Database(DECISION_DB)
+        table = db["decisions"]
+        table.create({"key": str, "allowed": int}, pk="key", if_not_exists=True)
+        table.upsert({"key": key, "allowed": int(result)}, pk="key")
+        stale = list(table.rows_where(order_by="rowid DESC", offset=CACHE_SIZE))
+        if stale:
+            table.delete_where("key in (?)", [row["key"] for row in stale])
     except OSError:
         pass
 

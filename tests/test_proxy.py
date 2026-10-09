@@ -1,4 +1,4 @@
-import sqlite3
+from sqlite_utils import Database
 
 import proxy.main as proxy_main
 from proxy.main import decision_answers, filter_html
@@ -64,9 +64,9 @@ def test_persistent_cache_is_bounded(tmp_path, monkeypatch):
     monkeypatch.setattr(proxy_main, "PERSISTENT_CACHE", True)
     for key in ("one", "two", "three"):
         proxy_main.persist_decision(key, True)
-    with sqlite3.connect(db_path) as db:
-        assert db.execute("SELECT COUNT(*) FROM decisions").fetchone()[0] == 2
-        assert db.execute("SELECT key FROM decisions ORDER BY rowid").fetchall() == [("two",), ("three",)]
+    db = Database(db_path)
+    assert db["decisions"].count == 2
+    assert [row["key"] for row in db["decisions"].rows_where(order_by="rowid")] == ["two", "three"]
 
 
 async def test_openai_decisions_payload(monkeypatch):
