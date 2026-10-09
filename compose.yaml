@@ -56,7 +56,7 @@ services:
       redlib:
         condition: service_healthy
       decider:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "127.0.0.1:${PROXY_PORT:-8080}:8080"
     networks:

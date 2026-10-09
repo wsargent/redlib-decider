@@ -127,9 +127,11 @@ async def is_allowed(text: str, client: httpx.AsyncClient) -> bool:
             and relationship < RELATIONSHIP_THRESHOLD
             and cute_animal < CUTE_ANIMAL_THRESHOLD
         )
-    except (httpx.HTTPError, KeyError, TypeError, ValueError):
-        # Keep Redlib usable if the local model is warming up or unavailable.
-        result = True
+    except (httpx.HTTPError, KeyError, TypeError, ValueError, RuntimeError):
+        # Do not silently bypass explicit exclusion rules when the model is
+        # unavailable. The Compose dependency keeps normal startup gated on
+        # Decider readiness; this protects later model failures.
+        result = False
     cache.put(key, result)
     return result
 

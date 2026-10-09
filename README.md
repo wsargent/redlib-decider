@@ -10,7 +10,7 @@ Browser -> http://127.0.0.1:8080 -> FastAPI proxy -> Redlib
                                       +-> Strands Decider HTTP server
 ```
 
-The proxy is deliberately a fail-open filter: while the model is downloading, warming up, or unavailable, Redlib content is returned unchanged. Decisions are cached in memory for the lifetime of the proxy.
+The proxy uses a strict filter: Compose waits for Decider readiness, and if the model later becomes unavailable, affected posts are removed rather than silently bypassing the requested exclusions. Decisions are cached in memory for the lifetime of the proxy.
 
 ## Requirements
 

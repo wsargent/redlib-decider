@@ -47,3 +47,13 @@ async def test_filter_removes_detail_page_post():
     html = '''<main><div class="post highlighted" id="detail"><h1 class="post_title">Cute cat after a breakup</h1><div class="post_body">A sad story</div></div></main>'''
     result = await filter_html(html, FakeClient())
     assert 'id="detail"' not in result
+
+
+async def test_filter_fails_closed_when_decider_is_unavailable():
+    class UnavailableClient:
+        async def post(self, url, json):
+            raise RuntimeError("decider unavailable")
+
+    html = '''<main id="posts"><div class="post" id="unknown"><h2 class="post_title">Unknown post</h2></div></main>'''
+    result = await filter_html(html, UnavailableClient())
+    assert 'id="unknown"' not in result
