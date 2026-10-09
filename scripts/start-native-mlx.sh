@@ -12,12 +12,18 @@ if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
 fi
 
 if ! command -v strands-decider >/dev/null 2>&1; then
-  cat >&2 <<'EOF'
-strands-decider is not installed.
-Install it with:
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "strands-decider is not installed and uv was not found in PATH." >&2
+    echo "Install uv, then rerun this script." >&2
+    exit 1
+  fi
+  echo "strands-decider is not installed; installing the MLX extra..."
+  uv pip install --system 'strands-decider[mlx]'
+  hash -r
+fi
 
-  uv pip install 'strands-decider[mlx]'
-EOF
+if ! command -v strands-decider >/dev/null 2>&1; then
+  echo "strands-decider installation completed, but the executable is not in PATH." >&2
   exit 1
 fi
 
