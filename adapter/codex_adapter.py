@@ -48,8 +48,6 @@ def decide(payload: dict):
             CODEX_MODEL,
             "--sandbox",
             "read-only",
-            "--ask-for-approval",
-            "never",
             "--ephemeral",
             "--output-schema",
             str(SCHEMA),
