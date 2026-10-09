@@ -54,6 +54,30 @@ def test_persistent_cache_is_bounded(tmp_path, monkeypatch):
     assert [row["key"] for row in db["decisions"].rows_where(order_by="rowid")] == ["two", "three"]
 
 
+async def test_cloudflare_decisions_payload(monkeypatch):
+    monkeypatch.setattr("proxy.main.DECISION_PROVIDER", "cloudflare")
+    monkeypatch.setattr("proxy.main.CLOUDFLARE_ACCOUNT_ID", "account")
+    monkeypatch.setattr("proxy.main.CLOUDFLARE_API_TOKEN", "token")
+
+    class CloudflareResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"result": {"answers": {"allowed": {"noul": 0.8}}}}
+
+    class CloudflareClient:
+        async def post(self, url, headers, json):
+            assert url.endswith("/accounts/account/ai/run/@cf/cloudflare/clef-flash")
+            assert headers["Authorization"] == "Bearer token"
+            assert json["model"] == "clef-flash"
+            assert set(json["questions"]) == {"allowed"}
+            return CloudflareResponse()
+
+    answers = await decision_answers("A post to classify", CloudflareClient())
+    assert answers["allowed"] == 0.8
+
+
 async def test_openai_decisions_payload(monkeypatch):
     monkeypatch.setattr("proxy.main.DECISION_PROVIDER", "openai")
     monkeypatch.setattr("proxy.main.OPENAI_API_KEY", "test-key")

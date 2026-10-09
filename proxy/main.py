@@ -25,6 +25,9 @@ DECISION_PROVIDER = os.getenv("DECISION_PROVIDER", "local").lower()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-6-luna")
+CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
+CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN", "")
+CLOUDFLARE_MODEL = os.getenv("CLOUDFLARE_MODEL", "clef-flash")
 
 SKIP_PREFIXES = ("/static/", "/css/", "/js/", "/favicon")
 
@@ -113,6 +116,21 @@ ALLOWED_INSTRUCTIONS = """Should this Reddit post be shown to a reader seeking i
 
 
 async def decision_answers(text: str, client: httpx.AsyncClient) -> dict[str, float]:
+    if DECISION_PROVIDER == "cloudflare":
+        if not CLOUDFLARE_ACCOUNT_ID or not CLOUDFLARE_API_TOKEN:
+            raise ValueError("CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN are required when DECISION_PROVIDER=cloudflare")
+        response = await client.post(
+            f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/cloudflare/{CLOUDFLARE_MODEL}",
+            headers={"Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}"},
+            json={
+                "model": CLOUDFLARE_MODEL,
+                "state": text,
+                "questions": {"allowed": {"type": "noul", "instructions": ALLOWED_INSTRUCTIONS}},
+            },
+        )
+        response.raise_for_status()
+        answer = response.json()["result"]["answers"]["allowed"]
+        return {"allowed": float(answer["noul"])}
     if DECISION_PROVIDER == "openai":
         if not OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY is required when DECISION_PROVIDER=openai")

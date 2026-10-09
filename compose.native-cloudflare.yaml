@@ -1,0 +1,11 @@
+# Use Cloudflare Workers AI Clef directly from the proxy.
+# Start with: docker compose -f compose.yaml -f compose.native-cloudflare.yaml up --build
+services:
+  decider:
+    profiles:
+      - local-decider
+
+  proxy:
+    environment:
+      DECISION_PROVIDER: cloudflare
+    depends_on: !reset []
