@@ -66,10 +66,10 @@ REDLIB_URL=http://127.0.0.1:8081 DECIDER_URL=http://127.0.0.1:8099 \
   strands-decider serve StrandsAgents/strands-decider-2B-hobson-v21 --device mlx --host 0.0.0.0 --port 8099
   ```
 
-  In another terminal:
+  Or use the startup script, which launches Decider, waits for `/health`, starts Docker, and stops Decider when Docker exits:
 
   ```sh
-  docker compose -f compose.yaml -f compose.native-mlx.yaml up --build
+  ./scripts/start-native-mlx.sh
   ```
 
-  The override disables the containerized Decider and points the proxy at `host.docker.internal:8099`. Stop the native server separately when finished. The proxy contract is unchanged.
+  The script accepts `DECIDER_MODEL`, `DECIDER_HOST`, and `DECIDER_PORT` overrides. The Compose override disables the containerized Decider and points the proxy at `host.docker.internal:8099`. The proxy contract is unchanged.
