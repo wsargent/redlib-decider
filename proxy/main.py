@@ -18,6 +18,9 @@ DECIDER_URL = os.getenv("DECIDER_URL", "http://decider:8099").rstrip("/")
 CODEX_ADAPTER_URL = os.getenv("CODEX_ADAPTER_URL", "http://host.docker.internal:8098").rstrip("/")
 ALLOWED_THRESHOLD = float(os.getenv("ALLOWED_THRESHOLD", "0.50"))
 DECIDER_TIMEOUT = float(os.getenv("DECIDER_TIMEOUT", "20"))
+# Timeout for fetching pages from Redlib, which waits on Reddit upstream.
+# Cold or slow Redlib responses routinely exceed the decision timeout.
+REDLIB_TIMEOUT = float(os.getenv("REDLIB_TIMEOUT", "60"))
 CACHE_SIZE = int(os.getenv("DECISION_CACHE_SIZE", "512"))
 DECIDER_CONCURRENCY = int(os.getenv("DECIDER_CONCURRENCY", "2"))
 DECISION_DB = os.getenv("DECISION_DB", "/data/decisions.sqlite3")
@@ -63,6 +66,7 @@ METRICS = {
     "decisions": 0,
     "decision_seconds": 0.0,
     "decision_failures": 0,
+    "upstream_failures": 0,
     "batch_requests": 0,
 }
 
@@ -338,9 +342,26 @@ async def proxy(request: Request, path: str) -> Response:
     # rewrite HTML. Request identity encoding so we never forward compressed
     # bytes after removing the upstream Content-Encoding header.
     headers["accept-encoding"] = "identity"
-    upstream = await request.app.state.client.request(
-        request.method, target, content=body, headers=headers
-    )
+    # Redlib waits on Reddit upstream and can be slow on cold fetches; give
+    # the fetch its own timeout and retry idempotent requests once before
+    # failing the page with a clean 502 instead of an unhandled 500.
+    upstream = None
+    for attempt in range(2):
+        try:
+            upstream = await request.app.state.client.request(
+                request.method,
+                target,
+                content=body,
+                headers=headers,
+                timeout=REDLIB_TIMEOUT,
+            )
+            break
+        except httpx.TransportError:
+            METRICS["upstream_failures"] += 1
+            if request.method not in ("GET", "HEAD") or attempt:
+                return Response("Bad Gateway: redlib upstream unreachable", status_code=502)
+    if upstream is None:  # pragma: no cover - loop always sets or returns
+        return Response("Bad Gateway: redlib upstream unreachable", status_code=502)
     content_type = upstream.headers.get("content-type", "")
     content = upstream.content
     if request.method == "GET" and "text/html" in content_type and not path.startswith(SKIP_PREFIXES):
