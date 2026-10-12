@@ -67,6 +67,8 @@ METRICS = {
     "decision_seconds": 0.0,
     "decision_failures": 0,
     "upstream_failures": 0,
+    "posts_filtered": 0,
+    "posts_no_response": 0,
     "batch_requests": 0,
 }
 
@@ -211,23 +213,29 @@ def store_decision(key: str, result: bool) -> None:
     persist_decision(key, result)
 
 
-async def is_allowed(text: str, client: httpx.AsyncClient) -> bool:
+async def is_allowed(text: str, client: httpx.AsyncClient) -> str:
+    """Classify post text: "allowed", "filtered", or "no response".
+
+    Decision failures are never cached: a transient provider error must not
+    permanently hide a post the way a real "filtered" verdict would.
+    """
     key = cache_key(text)
     cached = cache.get(key)
     if cached is not None:
         METRICS["cache_hits"] += 1
-        return cached
+        return "allowed" if cached else "filtered"
     started = asyncio.get_running_loop().time()
     try:
         answers = await decision_answers(text, client)
-        result = answers["allowed"] >= ALLOWED_THRESHOLD
-        METRICS["decisions"] += 1
+        allowed = answers["allowed"] >= ALLOWED_THRESHOLD
     except (httpx.HTTPError, KeyError, TypeError, ValueError, RuntimeError):
         METRICS["decision_failures"] += 1
-        result = False
+        METRICS["decision_seconds"] += asyncio.get_running_loop().time() - started
+        return "no response"
+    METRICS["decisions"] += 1
     METRICS["decision_seconds"] += asyncio.get_running_loop().time() - started
-    store_decision(key, result)
-    return result
+    store_decision(key, allowed)
+    return "allowed" if allowed else "filtered"
 
 
 async def batch_codex(posts, client: httpx.AsyncClient) -> dict[str, bool]:
@@ -258,9 +266,10 @@ async def batch_codex(posts, client: httpx.AsyncClient) -> dict[str, bool]:
             METRICS["decisions"] += 1
     except (httpx.HTTPError, KeyError, TypeError, ValueError):
         METRICS["decision_failures"] += len(uncached)
+        # Do not persist failures: they are not verdicts. Uncached posts are
+        # reclassified on the next request.
         for item in uncached:
             results[item["id"]] = False
-            store_decision(item["key"], False)
     METRICS["decision_seconds"] += asyncio.get_running_loop().time() - started
     return results
 
@@ -273,7 +282,7 @@ async def filter_html(html: str, client: httpx.AsyncClient) -> str:
     METRICS["posts_seen"] += len(posts)
     if DECISION_PROVIDER == "codex":
         results = await batch_codex(posts, client)
-        allowed = [results[str(index)] for index in range(len(posts))]
+        allowed = ["allowed" if results[str(index)] else "filtered" for index in range(len(posts))]
     else:
         semaphore = asyncio.Semaphore(DECIDER_CONCURRENCY)
 
@@ -283,12 +292,17 @@ async def filter_html(html: str, client: httpx.AsyncClient) -> str:
 
         allowed = await asyncio.gather(*(classify(post) for post in posts))
     METRICS["page_seconds"] += asyncio.get_running_loop().time() - page_started
-    for post, should_show in zip(posts, allowed):
-        if not should_show:
-            separator = post.find_next_sibling("hr", class_="sep")
-            post.decompose()
-            if separator:
-                separator.decompose()
+    # Keep failed classifications visible: replace the post card with a
+    # short marker instead of deleting it, so it is obvious how much of the
+    # listing was filtered and why, without exposing the post content.
+    for post, status in zip(posts, allowed):
+        if status == "allowed":
+            continue
+        if status == "no response":
+            METRICS["posts_no_response"] += 1
+        else:
+            METRICS["posts_filtered"] += 1
+        post.string = status
     return str(soup)
 
 
@@ -321,7 +335,7 @@ async def ready(request: Request) -> Response:
 async def metrics() -> Response:
     lines = []
     for name, value in METRICS.items():
-        metric_type = "counter" if name.endswith(("requests", "seen", "hits", "decisions", "failures")) else "gauge"
+        metric_type = "counter" if name.endswith(("requests", "seen", "hits", "decisions", "failures", "filtered", "no_response")) else "gauge"
         lines.append(f"# TYPE redlib_decider_{name} {metric_type}")
         lines.append(f"redlib_decider_{name} {value}")
     return Response("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
