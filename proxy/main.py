@@ -157,9 +157,10 @@ def allowed_instructions() -> str:
     topics = excluded_topics()
     details = ", ".join(topic_description(topic) for topic in topics)
     return (
-        f"Answer false only when the Reddit post is substantially about {details or 'any excluded topic'}. "
-        "Explicitness, profanity, NSFW status, and lack of substance are not reasons to answer false. "
-        "Otherwise answer true."
+        f"Reddit posts are allowed unless they are substantially about {details or 'any excluded topic'}. "
+        "Judge only the excluded topics: never judge quality, explicitness, NSFW status, or substance. "
+        "Answer true for allowed posts and false for posts substantially about "
+        f"{details or 'any excluded topic'}."
     )
 
 
