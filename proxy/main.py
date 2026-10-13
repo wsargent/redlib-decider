@@ -175,8 +175,11 @@ def allowed_instructions(nsfw_allowed: bool = True) -> str:
             )
         else:
             context = (
-                "This reader keeps sexual or explicit content hidden: such content "
-                "is a reason to answer false. "
+                "This reader does not want to see sexual or explicit content. "
+                "Answer false for any post that is sexual, explicit, or adult in nature, "
+                "or that is substantially about "
+                f"{details}. "
+                "Answer true otherwise. When unsure whether a post is sexual or explicit, answer false. "
             )
     return (
         f"{context}Reddit posts are allowed unless they are substantially about {details or 'any excluded topic'}. "

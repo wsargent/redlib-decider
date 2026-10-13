@@ -128,7 +128,7 @@ def test_instructions_follow_nsfw_cookie(monkeypatch):
     hidden = proxy_main.allowed_instructions(False)
     assert "adult communities" in allowed
     assert "adult communities" not in hidden
-    assert "keeps sexual or explicit content hidden" in hidden
+    assert "does not want to see sexual or explicit content" in hidden
 
     # If explicit content is configured as an excluded topic, it is filtered
     # for every reader and the cookie changes nothing.
