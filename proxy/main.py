@@ -501,7 +501,7 @@ async def ready(request: Request) -> Response:
 async def metrics() -> Response:
     lines = []
     for name, value in METRICS.items():
-        metric_type = "counter" if name.endswith(("requests", "seen", "hits", "decisions", "failures", "filtered", "no_response", "bypassed")) else "gauge"
+        metric_type = "counter" if name.endswith(("requests", "seen", "hits", "decisions", "failures", "filtered", "no_response", "bypassed", "posts")) else "gauge"
         lines.append(f"# TYPE redlib_decider_{name} {metric_type}")
         lines.append(f"redlib_decider_{name} {value}")
     return Response("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
