@@ -145,6 +145,60 @@ async def test_filter_topics_are_configurable(monkeypatch):
     assert answers["allowed"] == 0.8
 
 
+def test_circuit_breaker_opens_and_bypasses(monkeypatch):
+    monkeypatch.setattr(proxy_main, "SAMPLING_COUNT", 1)
+    monkeypatch.setattr(proxy_main.DECISION_BREAKER, "failure_threshold", 2)
+    monkeypatch.setattr(proxy_main.DECISION_BREAKER, "cooldown_seconds", 60)
+    proxy_main.DECISION_BREAKER.record_success()
+
+    class DownClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def post(self, url, json):
+            self.calls += 1
+            raise RuntimeError("provider down")
+
+    client = DownClient()
+    first = asyncio.run(proxy_main.is_allowed("Title: breaker one", client))
+    # Fail-open: once the breaker trips, posts bypass filtering.
+    assert first == "allowed"
+    calls_after_open = client.calls
+    assert calls_after_open == 2  # threshold reached on the 2nd failure
+    second = asyncio.run(proxy_main.is_allowed("Title: breaker two", client))
+    assert second == "allowed"
+    assert client.calls == calls_after_open  # no provider calls while open
+    proxy_main.DECISION_BREAKER.record_success()
+
+
+def test_circuit_breaker_recovers_after_cooldown(monkeypatch):
+    import time as time_mod
+
+    monkeypatch.setattr(proxy_main, "SAMPLING_COUNT", 1)
+    monkeypatch.setattr(proxy_main.DECISION_BREAKER, "failure_threshold", 2)
+    monkeypatch.setattr(proxy_main.DECISION_BREAKER, "cooldown_seconds", 60)
+    proxy_main.DECISION_BREAKER.record_success()
+
+    class DownClient:
+        async def post(self, url, json):
+            raise RuntimeError("provider down")
+
+    asyncio.run(proxy_main.is_allowed("Title: breaker trip", DownClient()))
+    assert proxy_main.DECISION_BREAKER.opened_at is not None
+    # Simulate the cooldown fully elapsing (half-open trial).
+    proxy_main.DECISION_BREAKER.opened_at = time_mod.monotonic() - 120
+
+    class OkClient:
+        async def post(self, url, json):
+            return FakeResponse(allowed=0.9)
+
+    verdict = asyncio.run(proxy_main.is_allowed("Title: breaker recovery", OkClient()))
+    assert verdict == "allowed"
+    assert proxy_main.DECISION_BREAKER.consecutive_failures == 0
+    assert proxy_main.DECISION_BREAKER.opened_at is None
+    proxy_main.DECISION_BREAKER.record_success()
+
+
 def test_cache_key_changes_with_filter_topics(monkeypatch):
     monkeypatch.setattr("proxy.main.FILTER_EXCLUDED_TOPICS", "politics")
     first = proxy_main.cache_key("same post")
@@ -156,7 +210,7 @@ def test_cache_key_changes_with_nsfw_mode():
     assert proxy_main.cache_key("same post", True) != proxy_main.cache_key("same post", False)
 
 
-def test_sampling_averages_scores(monkeypatch):
+def test_sampling_retries_until_it_has_n_successes(monkeypatch):
     monkeypatch.setattr(proxy_main, "SAMPLING_COUNT", 2)
 
     class QueueClient:
@@ -173,36 +227,36 @@ def test_sampling_averages_scores(monkeypatch):
 
     text = "Title: Averaging test post\nCommunity: r/test\nPreview: "
     key = proxy_main.cache_key(text)
-    client = QueueClient([0.0, 0.8])
+    client = QueueClient([RuntimeError("transient"), 0.0, 0.8])
     verdict = asyncio.run(proxy_main.is_allowed(text, client))
-    # Single-sample would have allowed on the 0.8; the mean of both is 0.4.
+    # A failed sample does not count toward the quota: it retries until it
+    # holds two successful samples, then averages them (0.0 + 0.8) / 2.
     assert verdict == "filtered"
-    assert client.calls == 2
+    assert client.calls == 3
     assert proxy_main.cache.get(key) is False
 
 
-def test_sampling_ignores_failed_samples(monkeypatch):
+def test_sampling_caps_attempts_and_serves_no_response(monkeypatch):
     monkeypatch.setattr(proxy_main, "SAMPLING_COUNT", 2)
 
-    class FlakyClient:
+    class DownClient:
         def __init__(self):
             self.calls = 0
 
         async def post(self, url, json):
             self.calls += 1
-            if self.calls == 1:
-                raise RuntimeError("transient")
-            return FakeResponse(allowed=0.9)
+            raise RuntimeError("provider down")
 
-    text = "Title: Partial failure test post\nCommunity: r/test\nPreview: "
+    text = "Title: Provider down test post\nCommunity: r/test\nPreview: "
     failures_before = proxy_main.METRICS["decision_failures"]
-    client = FlakyClient()
+    client = DownClient()
     verdict = asyncio.run(proxy_main.is_allowed(text, client))
-    assert verdict == "allowed"
-    assert client.calls == 2
-    assert proxy_main.METRICS["decision_failures"] == failures_before + 1
-    # The verdict rests on the successful sample and is cached.
-    assert proxy_main.cache.get(proxy_main.cache_key(text)) is True
+    # Attempt cap is twice the sample count; nothing is cached so the post
+    # re-classifies on its next load.
+    assert verdict == "no response"
+    assert client.calls == 4
+    assert proxy_main.METRICS["decision_failures"] == failures_before + 4
+    assert proxy_main.cache.get(proxy_main.cache_key(text)) is None
 
 
 def test_instructions_follow_nsfw_cookie(monkeypatch):

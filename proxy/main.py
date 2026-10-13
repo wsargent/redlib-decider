@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+import time
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -26,6 +27,11 @@ DECIDER_CONCURRENCY = int(os.getenv("DECIDER_CONCURRENCY", "2"))
 # Classify each uncached post N times and average the probabilities; this
 # smooths Clef's score drift between evaluations. Part of the cache key.
 SAMPLING_COUNT = max(int(os.getenv("SAMPLING_COUNT", "1")), 1)
+# Circuit breaker: after this many consecutive failed classifier calls the
+# proxy stops calling the provider for the cooldown window and lets posts
+# bypass filtering (fail-open).
+CIRCUIT_FAILURE_THRESHOLD = int(os.getenv("CIRCUIT_FAILURE_THRESHOLD", "5"))
+CIRCUIT_COOLDOWN_SECONDS = float(os.getenv("CIRCUIT_COOLDOWN_SECONDS", "60"))
 DECISION_DB = os.getenv("DECISION_DB", "/data/decisions.sqlite3")
 # Bump (or let deploy config set it) to force every cached verdict to
 # re-classify. It is part of the cache key fingerprint.
@@ -88,13 +94,43 @@ METRICS = {
     "decision_seconds": 0.0,
     "decision_failures": 0,
     "upstream_failures": 0,
+    "bypassed_posts": 0,
     "posts_filtered": 0,
     "posts_no_response": 0,
+    "bypassed_posts": 0,
     "batch_requests": 0,
 }
 
 
 PERSISTENT_CACHE = True
+
+
+@dataclass
+class CircuitBreaker:
+    # Stops calling the classifier entirely once it fails repeatedly, and
+    # retries after a cooldown. Fail-open: posts bypass filtering while open.
+    failure_threshold: int
+    cooldown_seconds: float
+    consecutive_failures: int = 0
+    opened_at: float | None = None
+
+    def record_success(self) -> None:
+        self.consecutive_failures = 0
+        self.opened_at = None
+
+    def record_failure(self, now: float) -> None:
+        self.consecutive_failures += 1
+        if self.consecutive_failures >= self.failure_threshold:
+            self.opened_at = now
+
+    def is_open(self, now: float) -> bool:
+        return self.opened_at is not None and now - self.opened_at < self.cooldown_seconds
+
+
+DECISION_BREAKER = CircuitBreaker(
+    failure_threshold=CIRCUIT_FAILURE_THRESHOLD,
+    cooldown_seconds=CIRCUIT_COOLDOWN_SECONDS,
+)
 
 
 def load_persistent_cache() -> None:
@@ -297,6 +333,11 @@ async def is_allowed(text: str, client: httpx.AsyncClient, nsfw_allowed: bool = 
     """
     key = cache_key(text, nsfw_allowed)
     rules = rules_fingerprint(nsfw_allowed)
+    breaker = DECISION_BREAKER
+    now = time.monotonic()
+    if breaker.is_open(now):
+        METRICS["bypassed_posts"] += 1
+        return "allowed"
     cached = cache.get(key)
     if cached is not None:
         METRICS["cache_hits"] += 1
@@ -304,15 +345,30 @@ async def is_allowed(text: str, client: httpx.AsyncClient, nsfw_allowed: bool = 
     started = asyncio.get_running_loop().time()
     scores: list[float] = []
     failures = 0
-    for _ in range(SAMPLING_COUNT):
+    attempts = 0
+    max_attempts = SAMPLING_COUNT * 2
+    while len(scores) < SAMPLING_COUNT and attempts < max_attempts:
+        attempts += 1
         try:
             answers = await decision_answers(text, client)
             scores.append(float(answers["allowed"]))
+            breaker.record_success()
         except (httpx.HTTPError, KeyError, TypeError, ValueError, RuntimeError):
             failures += 1
+            breaker.record_failure(time.monotonic())
+            if breaker.is_open(time.monotonic()):
+                # The breaker tripped mid-sampling: stop hammering the
+                # provider and fail open for this post.
+                break
+            await asyncio.sleep(min(0.5 * failures, 5))
     METRICS["decision_seconds"] += asyncio.get_running_loop().time() - started
     METRICS["decision_failures"] += failures
-    if not scores:
+    if breaker.is_open(time.monotonic()):
+        METRICS["bypassed_posts"] += 1
+        return "allowed"
+    if len(scores) < SAMPLING_COUNT:
+        # Could not gather enough successful samples before the attempt cap;
+        # nothing is cached, so the post re-classifies on its next load.
         return "no response"
     METRICS["decisions"] += len(scores)
     allowed = sum(scores) / len(scores) >= ALLOWED_THRESHOLD
@@ -445,7 +501,7 @@ async def ready(request: Request) -> Response:
 async def metrics() -> Response:
     lines = []
     for name, value in METRICS.items():
-        metric_type = "counter" if name.endswith(("requests", "seen", "hits", "decisions", "failures", "filtered", "no_response")) else "gauge"
+        metric_type = "counter" if name.endswith(("requests", "seen", "hits", "decisions", "failures", "filtered", "no_response", "bypassed")) else "gauge"
         lines.append(f"# TYPE redlib_decider_{name} {metric_type}")
         lines.append(f"redlib_decider_{name} {value}")
     return Response("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
