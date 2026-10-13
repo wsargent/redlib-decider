@@ -293,8 +293,8 @@ async def filter_html(html: str, client: httpx.AsyncClient) -> str:
         allowed = await asyncio.gather(*(classify(post) for post in posts))
     METRICS["page_seconds"] += asyncio.get_running_loop().time() - page_started
     # Keep failed classifications visible: replace the post card with a
-    # short marker instead of deleting it, so it is obvious how much of the
-    # listing was filtered and why, without exposing the post content.
+    # short marker plus the original title in small, dimmed text, so it is
+    # obvious what was filtered and why, without exposing the post body.
     for post, status in zip(posts, allowed):
         if status == "allowed":
             continue
@@ -302,7 +302,23 @@ async def filter_html(html: str, client: httpx.AsyncClient) -> str:
             METRICS["posts_no_response"] += 1
         else:
             METRICS["posts_filtered"] += 1
-        post.string = status
+        title_el = post.select_one(".post_title")
+        title_text = title_el.get_text(" ", strip=True) if title_el else ""
+        href = title_el.get("href") if title_el else None
+        post.clear()
+        marker = soup.new_tag("span")
+        marker.string = status
+        post.append(marker)
+        if title_text:
+            post.append(" ")
+            small = soup.new_tag("small", style="opacity: 0.6")
+            if href:
+                link = soup.new_tag("a", href=href)
+                link.string = title_text
+                small.append(link)
+            else:
+                small.string = title_text
+            post.append(small)
     return str(soup)
 
 

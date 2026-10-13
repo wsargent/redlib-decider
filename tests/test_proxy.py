@@ -129,23 +129,29 @@ async def test_ready_probes_redlib(monkeypatch):
 
 
 async def test_filter_marks_low_quality_and_political_posts():
-    html = '''<main id="posts"><div class="post" id="good"><h2 class="post_title">Good post</h2><div class="post_body post_preview">Useful detail</div></div><hr class="sep"/><div class="post" id="bad"><h2 class="post_title">Bad post</h2></div><hr class="sep"/><div class="post" id="politics"><h2 class="post_title">Politics post</h2></div></main>'''
+    html = '''<main id="posts"><div class="post" id="good"><h2 class="post_title">Good post</h2><div class="post_body post_preview">Useful detail</div></div><hr class="sep"/><div class="post" id="bad"><a class="post_title" href="/r/test/comments/1/bad/">Bad post</a><div class="post_body post_preview">Awful detail</div></div><hr class="sep"/><div class="post" id="politics"><h2 class="post_title">Politics post</h2></div></main>'''
     result = await filter_html(html, FakeClient())
     assert 'id="good"' in result
     assert 'id="bad"' in result
     assert 'id="politics"' in result
     assert result.count("filtered") == 2
-    # The original content must not survive the replacement.
-    assert "Bad post" not in result
-    assert "Politics post" not in result
+    # The marker keeps the original title in small text, linked to the post.
+    assert 'href="/r/test/comments/1/bad/"' in result
+    assert "Bad post" in result
+    assert "Politics post" in result
+    assert "<small" in result
+    # Post bodies must not survive the replacement.
+    assert "Awful detail" not in result
 
 
 async def test_filter_marks_detail_page_post():
     html = '''<main><div class="post highlighted" id="detail"><h1 class="post_title">Cute cat after a breakup</h1><div class="post_body">A sad story</div></div></main>'''
     result = await filter_html(html, FakeClient())
     assert 'id="detail"' in result
-    assert "Cute cat after a breakup" not in result
+    assert "A sad story" not in result
     assert "filtered" in result
+    assert "Cute cat after a breakup" in result
+    assert "<small" in result
 
 
 async def test_codex_batches_uncached_posts(monkeypatch):
@@ -174,7 +180,8 @@ async def test_codex_batches_uncached_posts(monkeypatch):
     assert 'id="good"' in result
     assert 'id="bad"' in result
     assert "filtered" in result
-    assert "Bad" not in result
+    assert "Bad" in result
+    assert "<small" in result
 
 
 async def test_filter_marks_no_response_when_decider_is_unavailable():
@@ -185,7 +192,8 @@ async def test_filter_marks_no_response_when_decider_is_unavailable():
     html = '''<main id="posts"><div class="post" id="unknown"><h2 class="post_title">Unknown post</h2></div></main>'''
     result = await filter_html(html, UnavailableClient())
     assert 'id="unknown"' in result
-    assert "Unknown post" not in result
     assert "no response" in result
+    assert "Unknown post" in result
+    assert "<small" in result
     # Failures are not verdicts and must not be cached as "filtered".
     assert proxy_main.cache.get(proxy_main.cache_key("Unknown post")) is None
