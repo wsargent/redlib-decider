@@ -142,7 +142,6 @@ DEFAULT_TOPIC_DETAILS = {
     "death or grief": "death, dying, bereavement, grief, funerals, or terminal illness",
     "divorce or breakups": "divorce, separation, breakups, infidelity, or romantic conflict",
     "cute animals": "cute, adorable, wholesome, or amusing animals",
-    "nsfw": "sexually explicit or adult content",
 }
 
 
