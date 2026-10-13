@@ -24,6 +24,9 @@ REDLIB_TIMEOUT = float(os.getenv("REDLIB_TIMEOUT", "60"))
 CACHE_SIZE = int(os.getenv("DECISION_CACHE_SIZE", "512"))
 DECIDER_CONCURRENCY = int(os.getenv("DECIDER_CONCURRENCY", "2"))
 DECISION_DB = os.getenv("DECISION_DB", "/data/decisions.sqlite3")
+# Bump (or let deploy config set it) to force every cached verdict to
+# re-classify. It is part of the cache key fingerprint.
+RULES_VERSION = os.getenv("RULES_VERSION", "1")
 DECISION_PROVIDER = os.getenv("DECISION_PROVIDER", "local").lower()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
@@ -97,21 +100,30 @@ def load_persistent_cache() -> None:
         os.makedirs(os.path.dirname(DECISION_DB), exist_ok=True)
         db = Database(DECISION_DB)
         table = db["decisions"]
-        table.create({"key": str, "allowed": int}, pk="key", if_not_exists=True)
-        for row in table.rows_where(order_by="rowid DESC", limit=CACHE_SIZE):
+        # Rows persisted by older rule sets lack the rules column; the cache
+        # is regenerable, so replace such tables outright.
+        if table.exists() and "rules" not in table.columns_dict:
+            table.drop()
+        current = (rules_fingerprint(True), rules_fingerprint(False))
+        table.create({"key": str, "allowed": int, "rules": str}, pk="key", if_not_exists=True)
+        # Ignore and purge verdicts made under any other rule set.
+        table.delete_where("rules IS NULL OR rules NOT IN (?, ?)", where_args=list(current))
+        for row in table.rows_where(
+            "rules IN (?, ?)", where_args=list(current), order_by="rowid DESC", limit=CACHE_SIZE
+        ):
             cache.put(row["key"], bool(row["allowed"]))
     except OSError:
         PERSISTENT_CACHE = False
 
 
-def persist_decision(key: str, result: bool) -> None:
+def persist_decision(key: str, result: bool, rules: str) -> None:
     if not PERSISTENT_CACHE:
         return
     try:
         db = Database(DECISION_DB)
         table = db["decisions"]
-        table.create({"key": str, "allowed": int}, pk="key", if_not_exists=True)
-        table.upsert({"key": key, "allowed": int(result)}, pk="key")
+        table.create({"key": str, "allowed": int, "rules": str}, pk="key", if_not_exists=True)
+        table.upsert({"key": key, "allowed": int(result), "rules": rules}, pk="key")
         stale = list(table.rows_where(order_by="rowid DESC", offset=CACHE_SIZE))
         if stale:
             table.delete_where("key in (?)", [row["key"] for row in stale])
@@ -243,19 +255,33 @@ async def decision_answers(text: str, client: httpx.AsyncClient) -> dict[str, fl
     return {"allowed": float(answer["noul"])}
 
 
+def rules_fingerprint(nsfw_allowed: bool = True) -> str:
+    # Identifies the rule set a verdict was made under: provider, model,
+    # rules version, threshold, prompt (incl. the reader's NSFW mode), and
+    # the excluded topics.
+    fingerprint = "|".join(
+        (
+            DECISION_PROVIDER,
+            OPENAI_MODEL,
+            RULES_VERSION,
+            str(ALLOWED_THRESHOLD),
+            hashlib.sha256(allowed_instructions(nsfw_allowed).encode()).hexdigest()[:16],
+            FILTER_EXCLUDED_TOPICS,
+        )
+    )
+    return hashlib.sha256(fingerprint.encode()).hexdigest()[:32]
+
+
 def cache_key(text: str, nsfw_allowed: bool = True) -> str:
-    # Include the prompt hash, which depends on the reader's NSFW setting,
-    # so classifier or setting changes re-classify instead of serving
-    # verdicts cached under different rules.
-    prompt = hashlib.sha256(allowed_instructions(nsfw_allowed).encode()).hexdigest()[:16]
-    return hashlib.sha256(
-        f"{DECISION_PROVIDER}:{OPENAI_MODEL}:{prompt}:{FILTER_EXCLUDED_TOPICS}:{text}".encode()
-    ).hexdigest()
+    # The key fingerprints everything a verdict depends on (see
+    # rules_fingerprint); the matching fingerprint is stored alongside the
+    # persisted verdict so stale rule sets stay visible and purgeable.
+    return hashlib.sha256(f"{rules_fingerprint(nsfw_allowed)}:{text}".encode()).hexdigest()
 
 
-def store_decision(key: str, result: bool) -> None:
+def store_decision(key: str, result: bool, rules: str) -> None:
     cache.put(key, result)
-    persist_decision(key, result)
+    persist_decision(key, result, rules)
 
 
 async def is_allowed(text: str, client: httpx.AsyncClient, nsfw_allowed: bool = True) -> str:
@@ -265,6 +291,7 @@ async def is_allowed(text: str, client: httpx.AsyncClient, nsfw_allowed: bool = 
     permanently hide a post the way a real "filtered" verdict would.
     """
     key = cache_key(text, nsfw_allowed)
+    rules = rules_fingerprint(nsfw_allowed)
     cached = cache.get(key)
     if cached is not None:
         METRICS["cache_hits"] += 1
@@ -279,11 +306,11 @@ async def is_allowed(text: str, client: httpx.AsyncClient, nsfw_allowed: bool = 
         return "no response"
     METRICS["decisions"] += 1
     METRICS["decision_seconds"] += asyncio.get_running_loop().time() - started
-    store_decision(key, allowed)
+    store_decision(key, allowed, rules)
     return "allowed" if allowed else "filtered"
 
 
-async def batch_codex(posts, client: httpx.AsyncClient) -> dict[str, bool]:
+async def batch_codex(posts, client: httpx.AsyncClient, nsfw_allowed: bool = True) -> dict[str, bool]:
     uncached = []
     results = {}
     for index, post in enumerate(posts):
@@ -299,6 +326,7 @@ async def batch_codex(posts, client: httpx.AsyncClient) -> dict[str, bool]:
         return results
     started = asyncio.get_running_loop().time()
     METRICS["batch_requests"] += 1
+    rules = rules_fingerprint(nsfw_allowed)
     try:
         response = await client.post(f"{CODEX_ADAPTER_URL}/decide", json={"posts": uncached})
         response.raise_for_status()
@@ -307,7 +335,7 @@ async def batch_codex(posts, client: httpx.AsyncClient) -> dict[str, bool]:
         for item in uncached:
             result = by_id[item["id"]]
             results[item["id"]] = result
-            store_decision(item["key"], result)
+            store_decision(item["key"], result, rules)
             METRICS["decisions"] += 1
     except (httpx.HTTPError, KeyError, TypeError, ValueError):
         METRICS["decision_failures"] += len(uncached)
@@ -326,7 +354,7 @@ async def filter_html(html: str, client: httpx.AsyncClient, nsfw_allowed: bool =
     METRICS["page_requests"] += 1
     METRICS["posts_seen"] += len(posts)
     if DECISION_PROVIDER == "codex":
-        results = await batch_codex(posts, client)
+        results = await batch_codex(posts, client, nsfw_allowed)
         allowed = ["allowed" if results[str(index)] else "filtered" for index in range(len(posts))]
     else:
         semaphore = asyncio.Semaphore(DECIDER_CONCURRENCY)

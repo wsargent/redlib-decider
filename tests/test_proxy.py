@@ -50,10 +50,41 @@ def test_persistent_cache_is_bounded(tmp_path, monkeypatch):
     monkeypatch.setattr(proxy_main, "CACHE_SIZE", 2)
     monkeypatch.setattr(proxy_main, "PERSISTENT_CACHE", True)
     for key in ("one", "two", "three"):
-        proxy_main.persist_decision(key, True)
+        proxy_main.persist_decision(key, True, "rules-1")
     db = Database(db_path)
     assert db["decisions"].count == 2
-    assert [row["key"] for row in db["decisions"].rows_where(order_by="rowid")] == ["two", "three"]
+    rows = list(db["decisions"].rows_where(order_by="rowid"))
+    assert [row["key"] for row in rows] == ["two", "three"]
+    assert all(row["rules"] == "rules-1" for row in rows)
+
+
+def test_persistent_cache_scopes_rows_by_rules(tmp_path, monkeypatch):
+    db_path = tmp_path / "decisions.sqlite3"
+    monkeypatch.setattr(proxy_main, "DECISION_DB", str(db_path))
+    monkeypatch.setattr(proxy_main, "CACHE_SIZE", 10)
+    monkeypatch.setattr(proxy_main, "PERSISTENT_CACHE", True)
+    stale_rules = "0" * 32
+    current_rules = proxy_main.rules_fingerprint(True)
+    proxy_main.persist_decision("stale", True, stale_rules)
+    proxy_main.persist_decision("fresh", False, current_rules)
+    proxy_main.cache.values.clear()
+    proxy_main.load_persistent_cache()
+    # Verdicts from other rule sets are neither loaded nor kept.
+    assert proxy_main.cache.get("stale") is None
+    assert proxy_main.cache.get("fresh") is False
+    assert Database(db_path)["decisions"].count == 1
+
+
+def test_legacy_table_without_rules_is_recreated(tmp_path, monkeypatch):
+    db_path = tmp_path / "decisions.sqlite3"
+    monkeypatch.setattr(proxy_main, "DECISION_DB", str(db_path))
+    monkeypatch.setattr(proxy_main, "PERSISTENT_CACHE", True)
+    db = Database(db_path)
+    db["decisions"].insert({"key": "legacy", "allowed": 1}, pk="key")
+    proxy_main.load_persistent_cache()
+    table = Database(db_path)["decisions"]
+    assert "rules" in table.columns_dict
+    assert table.count == 0
 
 
 async def test_cloudflare_decisions_payload(monkeypatch):
