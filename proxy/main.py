@@ -131,9 +131,6 @@ def persist_decision(key: str, result: bool, rules: str) -> None:
         pass
 
 
-load_persistent_cache()
-
-
 def post_text(post) -> str:
     title = post.select_one(".post_title")
     body = post.select_one(".post_body.post_preview")
@@ -277,6 +274,10 @@ def cache_key(text: str, nsfw_allowed: bool = True) -> str:
     # rules_fingerprint); the matching fingerprint is stored alongside the
     # persisted verdict so stale rule sets stay visible and purgeable.
     return hashlib.sha256(f"{rules_fingerprint(nsfw_allowed)}:{text}".encode()).hexdigest()
+
+
+# Loaded once every rule definition exists; runs at import time.
+load_persistent_cache()
 
 
 def store_decision(key: str, result: bool, rules: str) -> None:
