@@ -39,11 +39,18 @@ FILTER_EXCLUDED_TOPICS = os.getenv(
 SKIP_PREFIXES = ("/static/", "/css/", "/js/", "/favicon")
 
 # Hidden-until-hover styling for filtered-post titles, matching redlib's
-# .md-spoiler-text behavior but usable outside markdown content.
+# .md-spoiler-text behavior but usable outside markdown content. The
+# .revealed class gives touch devices a tap-to-toggle reveal.
 DECIDER_SPOILER_CSS = (
     ".decider-spoiler,.decider-spoiler a{background:var(--highlighted);color:transparent;border-radius:3px;cursor:pointer;}"
-    ".decider-spoiler:hover{background:var(--foreground);color:var(--text);}"
+    ".decider-spoiler:hover,.decider-spoiler.revealed{background:var(--foreground);color:var(--text);}"
     ".decider-spoiler:hover a{color:var(--accent);}"
+    ".decider-spoiler.revealed,.decider-spoiler.revealed a{color:var(--text);}"
+)
+DECIDER_SPOILER_JS = (
+    'document.addEventListener("click",function(e){'
+    "var t=e.target.closest&&e.target.closest('.decider-spoiler');"
+    "if(t){t.classList.toggle('revealed');}});"
 )
 
 
@@ -337,6 +344,9 @@ async def filter_html(html: str, client: httpx.AsyncClient) -> str:
         style = soup.new_tag("style")
         style.string = DECIDER_SPOILER_CSS
         (soup.head if soup.head is not None else soup).append(style)
+        script = soup.new_tag("script")
+        script.string = DECIDER_SPOILER_JS
+        (soup.body if soup.body is not None else soup).append(script)
     return str(soup)
 
 
@@ -417,6 +427,12 @@ async def proxy(request: Request, path: str) -> Response:
     response_headers = {
         key: value
         for key, value in upstream.headers.items()
-        if key.lower() not in {"content-length", "content-encoding", "transfer-encoding"}
+        if key.lower() not in {"content-length", "content-encoding", "transfer-encoding", "set-cookie"}
     }
-    return Response(content, status_code=upstream.status_code, headers=response_headers, media_type=None)
+    response = Response(content, status_code=upstream.status_code, headers=response_headers, media_type=None)
+    # Re-emit each Set-Cookie as its own header. Collapsing them into one
+    # comma-joined header breaks Safari: the comma inside cookie Expires
+    # dates makes the combined value ambiguous to strict parsers.
+    for cookie in upstream.headers.get_list("set-cookie"):
+        response.headers.append("set-cookie", cookie)
+    return response

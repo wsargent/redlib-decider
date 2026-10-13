@@ -1,6 +1,8 @@
 from sqlite_utils import Database
 
+import httpx
 import proxy.main as proxy_main
+from fastapi.testclient import TestClient
 from proxy.main import app, decision_answers, filter_html
 
 
@@ -143,6 +145,8 @@ async def test_filter_marks_low_quality_and_political_posts():
     assert 'class="decider-spoiler"' in result
     # The hover-to-reveal stylesheet is injected once per filtered page.
     assert result.count(".decider-spoiler") >= 1
+    # Tap-to-toggle reveal for touch devices is injected with the style.
+    assert "addEventListener" in result
     # Post bodies must not survive the replacement.
     assert "Awful detail" not in result
 
@@ -201,3 +205,32 @@ async def test_filter_marks_no_response_when_decider_is_unavailable():
     assert 'class="decider-spoiler"' in result
     # Failures are not verdicts and must not be cached as "filtered".
     assert proxy_main.cache.get(proxy_main.cache_key("Unknown post")) is None
+
+
+def test_proxy_preserves_multiple_set_cookie_headers():
+    class Upstream:
+        status_code = 200
+        content = b"ok"
+        encoding = "utf-8"
+        headers = httpx.Headers(
+            [
+                ("content-type", "text/plain"),
+                ("set-cookie", "theme=dark; Path=/; Expires=Tue, 12 Oct 2027 03:16:29 GMT"),
+                ("set-cookie", "layout=card; Path=/"),
+            ]
+        )
+
+    class FakeUpstream:
+        async def request(self, method, url, content=None, headers=None, timeout=None):
+            return Upstream()
+
+    app.state.client = FakeUpstream()
+    client = TestClient(app)
+    response = client.get("/plain")
+    assert response.status_code == 200
+    # Each Set-Cookie must be re-emitted as its own header: joining them
+    # with commas breaks Safari's parser (Expires dates contain commas).
+    cookies = response.headers.get_list("set-cookie")
+    assert len(cookies) == 2
+    assert any(cookie.startswith("theme=dark") for cookie in cookies)
+    assert any(cookie.startswith("layout=card") for cookie in cookies)
