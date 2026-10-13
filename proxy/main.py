@@ -142,6 +142,7 @@ DEFAULT_TOPIC_DETAILS = {
     "death or grief": "death, dying, bereavement, grief, funerals, or terminal illness",
     "divorce or breakups": "divorce, separation, breakups, infidelity, or romantic conflict",
     "cute animals": "cute, adorable, wholesome, or amusing animals",
+    "nsfw": "sexually explicit or adult content",
 }
 
 
@@ -158,7 +159,7 @@ def allowed_instructions() -> str:
     details = ", ".join(topic_description(topic) for topic in topics)
     return (
         f"Reddit posts are allowed unless they are substantially about {details or 'any excluded topic'}. "
-        "Judge only the excluded topics: never judge quality, explicitness, NSFW status, or substance. "
+        "Judge only the excluded topics: do not apply criteria that are not listed. "
         "Answer true for allowed posts and false for posts substantially about "
         f"{details or 'any excluded topic'}."
     )
