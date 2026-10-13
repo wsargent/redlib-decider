@@ -153,26 +153,34 @@ def topic_description(topic: str) -> str:
     return DEFAULT_TOPIC_DETAILS.get(topic.lower(), topic)
 
 
-def allowed_instructions() -> str:
+def allowed_instructions(nsfw_allowed: bool = True) -> str:
     topics = excluded_topics()
     details = ", ".join(topic_description(topic) for topic in topics)
     # Redlib hosts adult communities. When explicit content is not an
-    # excluded topic, say so: otherwise the classifier demotes posts on
-    # its own standards despite the topic-only instruction.
-    adult_allowed = not any(
-        word in topic_description(topic).lower()
+    # excluded topic, follow the reader's show-NSFW cookie: say adult
+    # content is allowed when it is, and that it is unwanted when not. If
+    # explicit content is configured as an excluded topic, the topic list
+    # already covers it for every reader.
+    configured_explicit = any(
+        word in f"{topic} {topic_description(topic)}".lower()
         for topic in topics
-        for word in ("explicit", "adult", "sexual")
+        for word in ("explicit", "adult", "sexual", "nsfw")
     )
-    context = (
-        "This Reddit feed includes adult communities, and sexual or explicit "
-        "content by itself is allowed. "
-        if adult_allowed
-        else ""
-    )
+    context = ""
+    if not configured_explicit:
+        if nsfw_allowed:
+            context = (
+                "This Reddit feed includes adult communities, and sexual or explicit "
+                "content by itself is allowed. "
+            )
+        else:
+            context = (
+                "This reader keeps sexual or explicit content hidden: such content "
+                "is a reason to answer false. "
+            )
     return (
         f"{context}Reddit posts are allowed unless they are substantially about {details or 'any excluded topic'}. "
-        "Judge only the excluded topics: do not apply criteria that are not listed. "
+        "Judge only what these rules say: do not apply criteria that are not listed. "
         "Answer true for allowed posts and false for posts substantially about "
         f"{details or 'any excluded topic'}."
     )
@@ -231,10 +239,11 @@ async def decision_answers(text: str, client: httpx.AsyncClient) -> dict[str, fl
     return {"allowed": float(answer["noul"])}
 
 
-def cache_key(text: str) -> str:
-    # Include the prompt hash so classifier changes re-classify instead of
-    # serving verdicts cached under the old prompt.
-    prompt = hashlib.sha256(allowed_instructions().encode()).hexdigest()[:16]
+def cache_key(text: str, nsfw_allowed: bool = True) -> str:
+    # Include the prompt hash, which depends on the reader's NSFW setting,
+    # so classifier or setting changes re-classify instead of serving
+    # verdicts cached under different rules.
+    prompt = hashlib.sha256(allowed_instructions(nsfw_allowed).encode()).hexdigest()[:16]
     return hashlib.sha256(
         f"{DECISION_PROVIDER}:{OPENAI_MODEL}:{prompt}:{FILTER_EXCLUDED_TOPICS}:{text}".encode()
     ).hexdigest()
@@ -245,13 +254,13 @@ def store_decision(key: str, result: bool) -> None:
     persist_decision(key, result)
 
 
-async def is_allowed(text: str, client: httpx.AsyncClient) -> str:
+async def is_allowed(text: str, client: httpx.AsyncClient, nsfw_allowed: bool = True) -> str:
     """Classify post text: "allowed", "filtered", or "no response".
 
     Decision failures are never cached: a transient provider error must not
     permanently hide a post the way a real "filtered" verdict would.
     """
-    key = cache_key(text)
+    key = cache_key(text, nsfw_allowed)
     cached = cache.get(key)
     if cached is not None:
         METRICS["cache_hits"] += 1
@@ -306,7 +315,7 @@ async def batch_codex(posts, client: httpx.AsyncClient) -> dict[str, bool]:
     return results
 
 
-async def filter_html(html: str, client: httpx.AsyncClient) -> str:
+async def filter_html(html: str, client: httpx.AsyncClient, nsfw_allowed: bool = True) -> str:
     page_started = asyncio.get_running_loop().time()
     soup = BeautifulSoup(html, "html.parser")
     posts = soup.select("#posts .post") or soup.select(".post")
@@ -320,7 +329,7 @@ async def filter_html(html: str, client: httpx.AsyncClient) -> str:
 
         async def classify(post) -> bool:
             async with semaphore:
-                return await is_allowed(post_text(post), client)
+                return await is_allowed(post_text(post), client, nsfw_allowed)
 
         allowed = await asyncio.gather(*(classify(post) for post in posts))
     METRICS["page_seconds"] += asyncio.get_running_loop().time() - page_started
@@ -438,7 +447,16 @@ async def proxy(request: Request, path: str) -> Response:
     content_type = upstream.headers.get("content-type", "")
     content = upstream.content
     if request.method == "GET" and "text/html" in content_type and not path.startswith(SKIP_PREFIXES):
-        content = (await filter_html(content.decode(upstream.encoding or "utf-8", errors="replace"), request.app.state.client)).encode()
+        # Redlib stores the reader's show-NSFW preference in a cookie; the
+        # classifier follows it so each browser gets its own rules.
+        nsfw_allowed = request.cookies.get("show_nsfw", "").lower() == "on"
+        content = (
+            await filter_html(
+                content.decode(upstream.encoding or "utf-8", errors="replace"),
+                request.app.state.client,
+                nsfw_allowed,
+            )
+        ).encode()
     response_headers = {
         key: value
         for key, value in upstream.headers.items()

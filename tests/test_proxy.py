@@ -119,6 +119,24 @@ def test_cache_key_changes_with_filter_topics(monkeypatch):
     assert proxy_main.cache_key("same post") != first
 
 
+def test_cache_key_changes_with_nsfw_mode():
+    assert proxy_main.cache_key("same post", True) != proxy_main.cache_key("same post", False)
+
+
+def test_instructions_follow_nsfw_cookie(monkeypatch):
+    allowed = proxy_main.allowed_instructions(True)
+    hidden = proxy_main.allowed_instructions(False)
+    assert "adult communities" in allowed
+    assert "adult communities" not in hidden
+    assert "keeps sexual or explicit content hidden" in hidden
+
+    # If explicit content is configured as an excluded topic, it is filtered
+    # for every reader and the cookie changes nothing.
+    monkeypatch.setattr("proxy.main.FILTER_EXCLUDED_TOPICS", "nsfw")
+    assert "adult communities" not in proxy_main.allowed_instructions(True)
+    assert "sexually explicit" not in proxy_main.allowed_instructions(True)
+
+
 async def test_ready_probes_redlib(monkeypatch):
     class ReadyClient:
         async def get(self, url):
