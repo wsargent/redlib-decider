@@ -23,6 +23,9 @@ DECIDER_TIMEOUT = float(os.getenv("DECIDER_TIMEOUT", "20"))
 REDLIB_TIMEOUT = float(os.getenv("REDLIB_TIMEOUT", "60"))
 CACHE_SIZE = int(os.getenv("DECISION_CACHE_SIZE", "512"))
 DECIDER_CONCURRENCY = int(os.getenv("DECIDER_CONCURRENCY", "2"))
+# Classify each uncached post N times and average the probabilities; this
+# smooths Clef's score drift between evaluations. Part of the cache key.
+SAMPLING_COUNT = max(int(os.getenv("SAMPLING_COUNT", "1")), 1)
 DECISION_DB = os.getenv("DECISION_DB", "/data/decisions.sqlite3")
 # Bump (or let deploy config set it) to force every cached verdict to
 # re-classify. It is part of the cache key fingerprint.
@@ -262,6 +265,7 @@ def rules_fingerprint(nsfw_allowed: bool = True) -> str:
             OPENAI_MODEL,
             RULES_VERSION,
             str(ALLOWED_THRESHOLD),
+            str(SAMPLING_COUNT),
             hashlib.sha256(allowed_instructions(nsfw_allowed).encode()).hexdigest()[:16],
             FILTER_EXCLUDED_TOPICS,
         )
@@ -298,15 +302,20 @@ async def is_allowed(text: str, client: httpx.AsyncClient, nsfw_allowed: bool = 
         METRICS["cache_hits"] += 1
         return "allowed" if cached else "filtered"
     started = asyncio.get_running_loop().time()
-    try:
-        answers = await decision_answers(text, client)
-        allowed = answers["allowed"] >= ALLOWED_THRESHOLD
-    except (httpx.HTTPError, KeyError, TypeError, ValueError, RuntimeError):
-        METRICS["decision_failures"] += 1
-        METRICS["decision_seconds"] += asyncio.get_running_loop().time() - started
-        return "no response"
-    METRICS["decisions"] += 1
+    scores: list[float] = []
+    failures = 0
+    for _ in range(SAMPLING_COUNT):
+        try:
+            answers = await decision_answers(text, client)
+            scores.append(float(answers["allowed"]))
+        except (httpx.HTTPError, KeyError, TypeError, ValueError, RuntimeError):
+            failures += 1
     METRICS["decision_seconds"] += asyncio.get_running_loop().time() - started
+    METRICS["decision_failures"] += failures
+    if not scores:
+        return "no response"
+    METRICS["decisions"] += len(scores)
+    allowed = sum(scores) / len(scores) >= ALLOWED_THRESHOLD
     store_decision(key, allowed, rules)
     return "allowed" if allowed else "filtered"
 

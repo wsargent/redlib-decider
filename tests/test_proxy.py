@@ -1,3 +1,5 @@
+import asyncio
+
 from sqlite_utils import Database
 
 import httpx
@@ -152,6 +154,55 @@ def test_cache_key_changes_with_filter_topics(monkeypatch):
 
 def test_cache_key_changes_with_nsfw_mode():
     assert proxy_main.cache_key("same post", True) != proxy_main.cache_key("same post", False)
+
+
+def test_sampling_averages_scores(monkeypatch):
+    monkeypatch.setattr(proxy_main, "SAMPLING_COUNT", 2)
+
+    class QueueClient:
+        def __init__(self, responses):
+            self.responses = list(responses)
+            self.calls = 0
+
+        async def post(self, url, json):
+            self.calls += 1
+            item = self.responses.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return FakeResponse(allowed=item)
+
+    text = "Title: Averaging test post\nCommunity: r/test\nPreview: "
+    key = proxy_main.cache_key(text)
+    client = QueueClient([0.0, 0.8])
+    verdict = asyncio.run(proxy_main.is_allowed(text, client))
+    # Single-sample would have allowed on the 0.8; the mean of both is 0.4.
+    assert verdict == "filtered"
+    assert client.calls == 2
+    assert proxy_main.cache.get(key) is False
+
+
+def test_sampling_ignores_failed_samples(monkeypatch):
+    monkeypatch.setattr(proxy_main, "SAMPLING_COUNT", 2)
+
+    class FlakyClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def post(self, url, json):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("transient")
+            return FakeResponse(allowed=0.9)
+
+    text = "Title: Partial failure test post\nCommunity: r/test\nPreview: "
+    failures_before = proxy_main.METRICS["decision_failures"]
+    client = FlakyClient()
+    verdict = asyncio.run(proxy_main.is_allowed(text, client))
+    assert verdict == "allowed"
+    assert client.calls == 2
+    assert proxy_main.METRICS["decision_failures"] == failures_before + 1
+    # The verdict rests on the successful sample and is cached.
+    assert proxy_main.cache.get(proxy_main.cache_key(text)) is True
 
 
 def test_instructions_follow_nsfw_cookie(monkeypatch):
