@@ -141,6 +141,7 @@ DEFAULT_TOPIC_DETAILS = {
     "politics": "politics, elections, government, or geopolitical conflict",
     "death or grief": "death, dying, bereavement, grief, funerals, or terminal illness",
     "divorce or breakups": "divorce, separation, breakups, infidelity, or romantic conflict",
+    "cheating or infidelity": "cheating, infidelity, affairs, or betrayal of a partner",
     "cute animals": "cute, adorable, wholesome, or amusing animals",
 }
 
