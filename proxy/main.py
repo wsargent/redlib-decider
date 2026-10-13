@@ -152,16 +152,15 @@ def allowed_instructions() -> str:
     details = ", ".join(topic_description(topic) for topic in topics)
     return (
         f"Should this Reddit post be shown to a reader seeking informative content without {topic_text}? "
-        f"Answer true only when all requirements are met: the post has meaningful substance; "
-        f"it is not substantially about {details or 'any excluded topic'}."
+        f"Answer true unless the post is substantially about {details or 'any excluded topic'}."
     )
 
 
 def decision_criteria() -> dict[str, str]:
     topics = ", ".join(excluded_topics()) or "any excluded topic"
     return {
-        "true": "The post has meaningful substance and is not substantially about any excluded category.",
-        "false": f"The post is low-quality or substantially concerns {topics}.",
+        "true": "The post is not substantially about any excluded category.",
+        "false": f"The post is substantially about {topics}.",
     }
 
 
@@ -211,8 +210,11 @@ async def decision_answers(text: str, client: httpx.AsyncClient) -> dict[str, fl
 
 
 def cache_key(text: str) -> str:
+    # Include the prompt hash so classifier changes re-classify instead of
+    # serving verdicts cached under the old prompt.
+    prompt = hashlib.sha256(allowed_instructions().encode()).hexdigest()[:16]
     return hashlib.sha256(
-        f"{DECISION_PROVIDER}:{OPENAI_MODEL}:{FILTER_EXCLUDED_TOPICS}:{text}".encode()
+        f"{DECISION_PROVIDER}:{OPENAI_MODEL}:{prompt}:{FILTER_EXCLUDED_TOPICS}:{text}".encode()
     ).hexdigest()
 
 
