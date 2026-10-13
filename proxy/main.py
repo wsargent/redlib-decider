@@ -156,8 +156,22 @@ def topic_description(topic: str) -> str:
 def allowed_instructions() -> str:
     topics = excluded_topics()
     details = ", ".join(topic_description(topic) for topic in topics)
+    # Redlib hosts adult communities. When explicit content is not an
+    # excluded topic, say so: otherwise the classifier demotes posts on
+    # its own standards despite the topic-only instruction.
+    adult_allowed = not any(
+        word in topic_description(topic).lower()
+        for topic in topics
+        for word in ("explicit", "adult", "sexual")
+    )
+    context = (
+        "This Reddit feed includes adult communities, and sexual or explicit "
+        "content by itself is allowed. "
+        if adult_allowed
+        else ""
+    )
     return (
-        f"Reddit posts are allowed unless they are substantially about {details or 'any excluded topic'}. "
+        f"{context}Reddit posts are allowed unless they are substantially about {details or 'any excluded topic'}. "
         "Judge only the excluded topics: do not apply criteria that are not listed. "
         "Answer true for allowed posts and false for posts substantially about "
         f"{details or 'any excluded topic'}."
