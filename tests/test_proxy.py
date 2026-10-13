@@ -140,6 +140,9 @@ async def test_filter_marks_low_quality_and_political_posts():
     assert "Bad post" in result
     assert "Politics post" in result
     assert "<small" in result
+    assert 'class="decider-spoiler"' in result
+    # The hover-to-reveal stylesheet is injected once per filtered page.
+    assert result.count(".decider-spoiler") >= 1
     # Post bodies must not survive the replacement.
     assert "Awful detail" not in result
 
@@ -195,5 +198,6 @@ async def test_filter_marks_no_response_when_decider_is_unavailable():
     assert "no response" in result
     assert "Unknown post" in result
     assert "<small" in result
+    assert 'class="decider-spoiler"' in result
     # Failures are not verdicts and must not be cached as "filtered".
     assert proxy_main.cache.get(proxy_main.cache_key("Unknown post")) is None
