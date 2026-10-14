@@ -98,6 +98,8 @@ METRICS = {
     "posts_filtered": 0,
     "posts_no_response": 0,
     "bypassed_posts": 0,
+    "sample_flips": 0,
+    "flip_checks": 0,
     "batch_requests": 0,
 }
 
@@ -372,6 +374,13 @@ async def is_allowed(text: str, client: httpx.AsyncClient, nsfw_allowed: bool = 
         # nothing is cached, so the post re-classifies on its next load.
         return "no response"
     METRICS["decisions"] += len(scores)
+    if len(scores) > 1:
+        # Measure classifier stability: a post "flaps" when its samples
+        # straddle the threshold (one would allow, another would filter).
+        METRICS["flip_checks"] += 1
+        verdicts = [s >= ALLOWED_THRESHOLD for s in scores]
+        if any(v != verdicts[0] for v in verdicts):
+            METRICS["sample_flips"] += 1
     allowed = sum(scores) / len(scores) >= ALLOWED_THRESHOLD
     store_decision(key, allowed, rules)
     return "allowed" if allowed else "filtered"
@@ -502,7 +511,7 @@ async def ready(request: Request) -> Response:
 async def metrics() -> Response:
     lines = []
     for name, value in METRICS.items():
-        metric_type = "counter" if name.endswith(("requests", "seen", "hits", "decisions", "failures", "filtered", "no_response", "bypassed", "posts")) else "gauge"
+        metric_type = "counter" if name.endswith(("requests", "seen", "hits", "decisions", "failures", "filtered", "no_response", "bypassed", "posts", "flips", "checks")) else "gauge"
         lines.append(f"# TYPE redlib_decider_{name} {metric_type}")
         lines.append(f"redlib_decider_{name} {value}")
     return Response("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")

@@ -266,6 +266,36 @@ def test_sampling_caps_attempts_and_serves_no_response(monkeypatch):
     assert proxy_main.cache.get(proxy_main.cache_key(text)) is None
 
 
+def test_flip_detection_records_disagreement(monkeypatch):
+    monkeypatch.setattr(proxy_main, "SAMPLING_COUNT", 2)
+    monkeypatch.setattr(proxy_main, "ALLOWED_THRESHOLD", 0.5)
+
+    class QueueClient:
+        def __init__(self, responses):
+            self.responses = list(responses)
+
+        async def post(self, url, json):
+            item = self.responses.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return FakeResponse(allowed=item)
+
+    checks_before = proxy_main.METRICS["flip_checks"]
+    flips_before = proxy_main.METRICS["sample_flips"]
+
+    straddle = "Title: flip straddle test post\nCommunity: r/test\nPreview: "
+    verdict = asyncio.run(proxy_main.is_allowed(straddle, QueueClient([0.2, 0.9])))
+    assert verdict == "allowed"  # mean 0.55 clears the 0.5 threshold
+    assert proxy_main.METRICS["flip_checks"] == checks_before + 1
+    assert proxy_main.METRICS["sample_flips"] == flips_before + 1
+
+    agree = "Title: flip agree test post\nCommunity: r/test\nPreview: "
+    verdict = asyncio.run(proxy_main.is_allowed(agree, QueueClient([0.8, 0.9])))
+    assert verdict == "allowed"
+    assert proxy_main.METRICS["flip_checks"] == checks_before + 2
+    assert proxy_main.METRICS["sample_flips"] == flips_before + 1
+
+
 def test_instructions_follow_nsfw_cookie(monkeypatch):
     allowed = proxy_main.allowed_instructions(True)
     hidden = proxy_main.allowed_instructions(False)
