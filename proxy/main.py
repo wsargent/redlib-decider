@@ -299,6 +299,7 @@ def rules_fingerprint(nsfw_allowed: bool = True) -> str:
         (
             DECISION_PROVIDER,
             OPENAI_MODEL,
+            CLOUDFLARE_MODEL,
             RULES_VERSION,
             str(ALLOWED_THRESHOLD),
             str(SAMPLING_COUNT),

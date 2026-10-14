@@ -210,6 +210,13 @@ def test_cache_key_changes_with_nsfw_mode():
     assert proxy_main.cache_key("same post", True) != proxy_main.cache_key("same post", False)
 
 
+def test_cache_key_changes_with_cloudflare_model(monkeypatch):
+    monkeypatch.setattr(proxy_main, "CLOUDFLARE_MODEL", "clef-flash")
+    flash = proxy_main.cache_key("same post")
+    monkeypatch.setattr(proxy_main, "CLOUDFLARE_MODEL", "clef")
+    assert proxy_main.cache_key("same post") != flash
+
+
 def test_sampling_retries_until_it_has_n_successes(monkeypatch):
     monkeypatch.setattr(proxy_main, "SAMPLING_COUNT", 2)
 
